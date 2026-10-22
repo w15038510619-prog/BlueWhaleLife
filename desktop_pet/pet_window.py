@@ -193,7 +193,7 @@ class PetWindow(QWidget):
 
         # Action: Open Dashboard
         dashboard_act = QAction("🌐 打开管理面板", self)
-        dashboard_act.triggered.connect(lambda: webbrowser.open("http://localhost:5173"))
+        dashboard_act.triggered.connect(lambda: webbrowser.open("http://127.0.0.1:8000"))
         menu.addAction(dashboard_act)
 
         # Action: Toggle Always on Top

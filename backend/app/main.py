@@ -302,11 +302,15 @@ def health_check():
 
 
 # --- 7. Static Frontend Mounting & SPA Fallback ---
+import sys
 from pathlib import Path
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
-FRONTEND_DIST = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
+if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+    FRONTEND_DIST = Path(sys._MEIPASS) / "frontend" / "dist"
+else:
+    FRONTEND_DIST = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
 if FRONTEND_DIST.exists():
     assets_dir = FRONTEND_DIST / "assets"
     if assets_dir.exists():

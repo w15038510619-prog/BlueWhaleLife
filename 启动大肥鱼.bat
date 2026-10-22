@@ -3,33 +3,23 @@ chcp 65001 > nul
 title 大肥鱼 · 鲨鱼娘的B站生活 (BlueWhaleLife)
 echo ======================================================================
 echo           🦈 大肥鱼 · 鲨鱼娘的B站生活 (BlueWhaleLife) 🦈
-echo       Windows 优先 | 独立人格 | 长期记忆 | 深度思考 | 60FPS 桌宠
+echo       Windows 独立打包可执行程序 | 独立人格 | 长期记忆 | 60FPS 桌宠
 echo ======================================================================
 echo.
 cd /d "%~dp0"
-set PYTHONPATH=%CD%
 
-echo [1/3] 正在启动后端核心服务 (FastAPI + 内嵌管理面板)...
-start "BlueWhaleLife-Server" cmd /c "python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000"
-
-timeout /t 2 /nobreak > nul
-
-echo [2/3] 正在唤醒桌面看板娘【鲨鱼娘】(PySide6)...
-if exist "dist\BlueWhalePet\BlueWhalePet.exe" (
-    start "" "dist\BlueWhalePet\BlueWhalePet.exe"
+if exist "dist\BlueWhaleLife\BlueWhaleLife.exe" (
+    echo [启动中] 正在启动打包一体化程序 (dist\BlueWhaleLife\BlueWhaleLife.exe)...
+    start "" "dist\BlueWhaleLife\BlueWhaleLife.exe"
 ) else (
-    start "BlueWhaleLife-Pet" cmd /c "python -m desktop_pet.main"
+    echo [启动中] 正在以 Python 模式启动...
+    python app_launcher.py
 )
-
-timeout /t 1 /nobreak > nul
-
-echo [3/3] 正在为您打开管理面板网页...
-start "" "http://127.0.0.1:8000"
 
 echo.
 echo ======================================================================
-echo  ✨ 全部组件已成功启动！
-echo  - 桌面看板娘已唤醒在屏幕右下角（支持拖拽、摸头、右键菜单、快捷聊天）
-echo  - 管理面板地址: http://127.0.0.1:8000 (已自动在默认浏览器中打开)
+echo  ✨ 启动成功！
+echo  - 桌面右下角将出现可爱的【鲨鱼娘】看板娘（支持鼠标摸头、拖拽、右键菜单）
+echo  - 浏览器将自动为您打开管理控制台: http://127.0.0.1:8000
 echo ======================================================================
-timeout /t 4
+timeout /t 3

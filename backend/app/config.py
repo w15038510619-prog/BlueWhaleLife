@@ -1,10 +1,16 @@
 from __future__ import annotations
 import json
 import os
+import sys
 from pathlib import Path
 from pydantic import BaseModel, Field
 
-DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
+if getattr(sys, "frozen", False):
+    BASE_DIR = Path(sys.executable).resolve().parent
+else:
+    BASE_DIR = Path(__file__).resolve().parent.parent.parent
+
+DATA_DIR = BASE_DIR / "data"
 CONFIG_FILE = DATA_DIR / "config.json"
 DB_FILE = DATA_DIR / "whale_life.db"
 
