@@ -2,8 +2,8 @@ import sys
 import os
 import time
 import threading
+import urllib.request
 import webbrowser
-import httpx
 import uvicorn
 from PySide6.QtWidgets import QApplication
 
@@ -45,10 +45,11 @@ def wait_and_open_browser():
     """Waits until the backend server is actually responding before opening browser"""
     for _ in range(30):
         try:
-            res = httpx.get("http://127.0.0.1:8000/api/health", timeout=1.0)
-            if res.status_code == 200:
-                webbrowser.open("http://127.0.0.1:8000")
-                return
+            req = urllib.request.Request("http://127.0.0.1:8000/api/health")
+            with urllib.request.urlopen(req, timeout=1.0) as resp:
+                if resp.status == 200:
+                    webbrowser.open("http://127.0.0.1:8000")
+                    return
         except Exception:
             pass
         time.sleep(0.3)
