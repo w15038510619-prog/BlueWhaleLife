@@ -1,7 +1,10 @@
 import pytest
 from fastapi.testclient import TestClient
 from backend.app.main import app
+from backend.app.config import current_settings
 
+# Ensure unit tests run in offline/isolated demo mode
+current_settings.demo_mode = True
 client = TestClient(app)
 
 

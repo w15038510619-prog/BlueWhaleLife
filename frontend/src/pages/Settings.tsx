@@ -16,6 +16,8 @@ export const Settings: React.FC = () => {
   const [dailyCostBudget, setDailyCostBudget] = useState(5.0);
   const [testingConnection, setTestingConnection] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; latency_ms: number; reply?: string; model?: string; protocol?: string; error_message?: string; status_code?: number } | null>(null);
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [fetchingModels, setFetchingModels] = useState(false);
 
   const [characterName, setCharacterName] = useState('大肥鱼');
   const [curiosity, setCuriosity] = useState(0.85);
@@ -143,6 +145,32 @@ export const Settings: React.FC = () => {
     }
   };
 
+  const handleFetchModels = async () => {
+    setFetchingModels(true);
+    try {
+      const res = await api.fetchModels({
+        base_url: baseUrl.trim(),
+        api_key: apiKey.trim() || undefined
+      });
+      if (res.models && res.models.length > 0) {
+        setAvailableModels(res.models);
+        if (!res.models.includes(model)) {
+          setModel(res.models[0]);
+        }
+        setToast(`已获取到可用模型列表: ${res.models.join(', ')}`);
+        setTimeout(() => setToast(null), 4000);
+      } else {
+        setToast('未获取到模型列表，请确认 Base URL 与 Key 是否有效');
+        setTimeout(() => setToast(null), 3500);
+      }
+    } catch (e: any) {
+      setToast(`获取模型失败: ${e.message || e}`);
+      setTimeout(() => setToast(null), 3500);
+    } finally {
+      setFetchingModels(false);
+    }
+  };
+
   return (
     <div>
       <div className="page-header">
@@ -213,10 +241,10 @@ export const Settings: React.FC = () => {
                 onClick={() => {
                   setBaseUrl('https://api.aixoras.com/v1');
                   setProtocol('responses');
-                  setModel('deepseek-chat');
+                  setModel('deepseek-v4.1-flash');
                 }}
               >
-                🌊 预设: Aixoras (推荐)
+                🌊 预设: Aixoras (鲨鱼娘)
               </button>
               <button
                 type="button"
@@ -266,35 +294,69 @@ export const Settings: React.FC = () => {
 
           <div className="grid-2" style={{ marginTop: '14px' }}>
             <div>
-              <label style={{ fontSize: '13px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '6px' }}>
-                模型名称 (Model ID，非令牌分组名)：
-              </label>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                <label style={{ fontSize: '13px', fontWeight: '600', color: '#475569' }}>
+                  模型名称 (Model ID，非令牌分组名)：
+                </label>
+                <button
+                  type="button"
+                  style={{ background: 'none', border: 'none', color: '#2563eb', fontSize: '12px', cursor: 'pointer', padding: 0 }}
+                  onClick={handleFetchModels}
+                  disabled={fetchingModels}
+                >
+                  {fetchingModels ? '正在查询...' : '🔍 获取可用模型'}
+                </button>
+              </div>
               <div style={{ display: 'flex', gap: '6px' }}>
                 <input
                   type="text"
                   className="input"
                   value={model}
                   onChange={e => setModel(e.target.value)}
-                  placeholder="例如: deepseek-chat 或 deepseek-reasoner"
+                  placeholder="例如: deepseek-v4.1-flash"
                   required
                 />
                 <button
                   type="button"
                   className="btn btn-secondary"
-                  style={{ whiteSpace: 'nowrap', fontSize: '12px' }}
-                  onClick={() => setModel('deepseek-chat')}
+                  style={{ whiteSpace: 'nowrap', fontSize: '11px', padding: '4px 8px' }}
+                  onClick={() => setModel('deepseek-v4.1-flash')}
+                  title="Aixoras 鲨鱼娘令牌绑定的真实模型 ID"
                 >
-                  Chat
+                  Flash (Aixoras)
                 </button>
                 <button
                   type="button"
                   className="btn btn-secondary"
-                  style={{ whiteSpace: 'nowrap', fontSize: '12px' }}
-                  onClick={() => setModel('deepseek-reasoner')}
+                  style={{ whiteSpace: 'nowrap', fontSize: '11px', padding: '4px 8px' }}
+                  onClick={() => setModel('deepseek-chat')}
                 >
-                  Reasoner
+                  Chat
                 </button>
               </div>
+              {availableModels.length > 0 && (
+                <div style={{ marginTop: '6px', display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '11px', color: '#64748b' }}>可用模型:</span>
+                  {availableModels.map(m => (
+                    <span
+                      key={m}
+                      onClick={() => setModel(m)}
+                      style={{
+                        fontSize: '11px',
+                        cursor: 'pointer',
+                        padding: '1px 6px',
+                        borderRadius: '4px',
+                        background: model === m ? '#dbeafe' : '#f1f5f9',
+                        color: model === m ? '#1d4ed8' : '#334155',
+                        fontWeight: model === m ? 'bold' : 'normal',
+                        border: '1px solid #cbd5e1'
+                      }}
+                    >
+                      {m}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div>
@@ -303,13 +365,16 @@ export const Settings: React.FC = () => {
               </label>
               <input
                 type="number"
-                step="0.5"
-                min="0.1"
-                max="100"
+                step="any"
+                min="0"
+                max="1000"
                 className="input"
                 value={dailyCostBudget}
-                onChange={e => setDailyCostBudget(parseFloat(e.target.value) || 5.0)}
+                onChange={e => setDailyCostBudget(parseFloat(e.target.value) || 0)}
               />
+              <span style={{ fontSize: '11px', color: '#64748b', marginTop: '4px', display: 'block' }}>
+                设置每日允许消耗的人民币上限（输入整数或小数均可，如 5 或 10.5）
+              </span>
             </div>
           </div>
 

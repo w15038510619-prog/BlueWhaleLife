@@ -112,5 +112,10 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(data)
     }),
+  fetchModels: (data: { base_url?: string; api_key?: string }) =>
+    request<{ models: string[] }>('/api/settings/models', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    }),
   getUsage: () => request<{ today_cost_cny: number; total_calls: number; total_tokens: number; all_time_cost_cny: number; recent_logs: any[] }>('/api/settings/usage')
 };

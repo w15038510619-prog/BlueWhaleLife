@@ -462,6 +462,21 @@ async def test_llm_connection(req: TestConnectionRequest = None):
     return result
 
 
+class QueryModelsRequest(BaseModel):
+    base_url: Optional[str] = None
+    api_key: Optional[str] = None
+
+
+@app.post("/api/settings/models")
+async def query_available_models(req: QueryModelsRequest = None):
+    req = req or QueryModelsRequest()
+    if req.base_url:
+        _validate_base_url(req.base_url)
+    client = LLMClient()
+    models = await client.fetch_models(base_url=req.base_url, api_key=req.api_key)
+    return {"models": models}
+
+
 @app.get("/api/settings/usage")
 def get_llm_usage():
     from backend.app.database import get_api_usage_summary

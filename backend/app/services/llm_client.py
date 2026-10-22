@@ -162,8 +162,13 @@ class LLMClient:
         try:
             async with httpx.AsyncClient(timeout=45.0) as client:
                 res = await client.post(url, headers=self._get_headers(custom_key), json=payload)
-                if res.status_code == 401 or res.status_code == 403:
-                    raise LLMAPIError("API 鉴权失败 (401/403): 请检查 API Key 是否正确或已启用", status_code=res.status_code)
+                if res.status_code in (401, 403):
+                    try:
+                        err_data = res.json()
+                        server_msg = err_data.get("error", {}).get("message") or err_data.get("message") or res.text
+                    except Exception:
+                        server_msg = res.text[:200]
+                    raise LLMAPIError(f"API 鉴权/权限失败 ({res.status_code}): {server_msg}", status_code=res.status_code, details=server_msg)
                 if res.status_code == 429:
                     raise LLMAPIError("API 速率限制 (429): 当前请求过多或已达平台限流配额", status_code=429)
                 if res.status_code == 404:
@@ -226,7 +231,12 @@ class LLMClient:
             async with httpx.AsyncClient(timeout=45.0) as client:
                 res = await client.post(url, headers=self._get_headers(custom_key), json=payload)
                 if res.status_code in (401, 403):
-                    raise LLMAPIError("API 鉴权失败 (401/403): 请检查 API Key 是否有效", status_code=res.status_code)
+                    try:
+                        err_data = res.json()
+                        server_msg = err_data.get("error", {}).get("message") or err_data.get("message") or res.text
+                    except Exception:
+                        server_msg = res.text[:200]
+                    raise LLMAPIError(f"API 鉴权/权限失败 ({res.status_code}): {server_msg}", status_code=res.status_code, details=server_msg)
                 if res.status_code == 429:
                     raise LLMAPIError("API 速率限制 (429): 已触发服务商并发或配额限制", status_code=429)
                 if res.status_code == 404:
@@ -246,6 +256,26 @@ class LLMClient:
             raise LLMAPIError("API 请求超时 (45s): 无法在规定时间内获得响应", status_code=408)
         except httpx.ConnectError as e:
             raise LLMAPIError(f"API 网络连接失败: 无法连接至 {base_url}", details=str(e))
+
+    async def fetch_models(
+        self,
+        base_url: Optional[str] = None,
+        api_key: Optional[str] = None
+    ) -> List[str]:
+        """Query /v1/models to discover which models this API token actually has access to."""
+        test_base_url = (base_url or self.settings.llm_base_url).rstrip("/")
+        test_key = api_key if api_key is not None else self.settings.llm_api_key
+        url = f"{test_base_url}/models"
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                res = await client.get(url, headers=self._get_headers(test_key))
+                if res.status_code == 200:
+                    data = res.json()
+                    models = [m.get("id") for m in data.get("data", []) if m.get("id")]
+                    return models
+                return []
+        except Exception:
+            return []
 
     async def test_connection(
         self,
