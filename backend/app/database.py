@@ -200,6 +200,26 @@ def init_db() -> None:
             )
         """)
 
+        # 8. API 用量与账单追踪表 (API Usage Logs)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS api_usage_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                model TEXT NOT NULL,
+                endpoint TEXT NOT NULL,
+                protocol TEXT NOT NULL,
+                input_tokens INTEGER DEFAULT 0,
+                output_tokens INTEGER DEFAULT 0,
+                total_tokens INTEGER DEFAULT 0,
+                cost_cny REAL DEFAULT 0.0,
+                is_estimated INTEGER DEFAULT 1,
+                caller TEXT DEFAULT '',
+                latency_ms INTEGER DEFAULT 0,
+                status TEXT DEFAULT 'success',
+                error_message TEXT DEFAULT ''
+            )
+        """)
+
         # 8. 自主调度器状态持久化表 (Scheduler State)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS scheduler_state (
@@ -272,3 +292,101 @@ def init_db() -> None:
             ))
 
         print("[Database] SQLite initialized and migrated successfully.")
+
+
+def log_api_usage(
+    model: str,
+    endpoint: str,
+    protocol: str,
+    input_tokens: int,
+    output_tokens: int,
+    caller: str = "",
+    latency_ms: int = 0,
+    status: str = "success",
+    error_message: str = ""
+) -> float:
+    """Record LLM API call tokens and cost calculation to SQLite."""
+    # DeepSeek standard pricing estimation: input 1.0 RMB / 1M, output 2.0 RMB / 1M
+    total_tokens = input_tokens + output_tokens
+    cost_cny = round((input_tokens * 1.0 + output_tokens * 2.0) / 1_000_000, 6)
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO api_usage_logs (
+                    timestamp, model, endpoint, protocol, input_tokens,
+                    output_tokens, total_tokens, cost_cny, is_estimated,
+                    caller, latency_ms, status, error_message
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
+            """, (
+                timestamp, model, endpoint, protocol, input_tokens,
+                output_tokens, total_tokens, cost_cny, caller,
+                latency_ms, status, error_message
+            ))
+    except Exception as e:
+        print(f"[Database] Warning: failed to log API usage: {e}")
+
+    return cost_cny
+
+
+def get_daily_api_cost(target_date: Optional[str] = None) -> float:
+    """Calculate cumulative API expenditure in CNY for target day (defaults to today)."""
+    if not target_date:
+        target_date = datetime.now().strftime("%Y-%m-%d")
+
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT COALESCE(SUM(cost_cny), 0.0) FROM api_usage_logs
+                WHERE timestamp LIKE ? AND status = 'success'
+            """, (f"{target_date}%",))
+            row = cursor.fetchone()
+            return float(row[0]) if row else 0.0
+    except Exception:
+        return 0.0
+
+
+def get_api_usage_summary() -> dict[str, Any]:
+    """Retrieve cumulative tokens, today's cost, and recent call logs."""
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    today_cost = get_daily_api_cost(today_str)
+
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT 
+                    COUNT(*) as total_calls,
+                    COALESCE(SUM(total_tokens), 0) as total_tokens,
+                    COALESCE(SUM(cost_cny), 0.0) as all_time_cost
+                FROM api_usage_logs
+                WHERE status = 'success'
+            """)
+            stats_row = cursor.fetchone()
+
+            cursor.execute("""
+                SELECT timestamp, model, protocol, total_tokens, cost_cny, latency_ms, status, error_message
+                FROM api_usage_logs
+                ORDER BY id DESC LIMIT 20
+            """)
+            recent_logs = [dict(r) for r in cursor.fetchall()]
+
+            return {
+                "today_cost_cny": today_cost,
+                "total_calls": stats_row["total_calls"] if stats_row else 0,
+                "total_tokens": stats_row["total_tokens"] if stats_row else 0,
+                "all_time_cost_cny": round(stats_row["all_time_cost"], 4) if stats_row else 0.0,
+                "recent_logs": recent_logs
+            }
+    except Exception as e:
+        return {
+            "today_cost_cny": today_cost,
+            "total_calls": 0,
+            "total_tokens": 0,
+            "all_time_cost_cny": 0.0,
+            "recent_logs": [],
+            "error": str(e)
+        }

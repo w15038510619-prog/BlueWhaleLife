@@ -9,9 +9,14 @@ export const Settings: React.FC = () => {
   // LLM Settings
   const [baseUrl, setBaseUrl] = useState('');
   const [model, setModel] = useState('');
+  const [protocol, setProtocol] = useState('responses');
   const [apiKey, setApiKey] = useState('');
   const [showKey, setShowKey] = useState(false);
   const [demoMode, setDemoMode] = useState(true);
+  const [dailyCostBudget, setDailyCostBudget] = useState(5.0);
+  const [testingConnection, setTestingConnection] = useState(false);
+  const [testResult, setTestResult] = useState<{ success: boolean; latency_ms: number; reply?: string; model?: string; protocol?: string; error_message?: string; status_code?: number } | null>(null);
+
   const [characterName, setCharacterName] = useState('大肥鱼');
   const [curiosity, setCuriosity] = useState(0.85);
   const [novelty, setNovelty] = useState(0.35);
@@ -45,7 +50,9 @@ export const Settings: React.FC = () => {
       setSettings(s);
       setBaseUrl(s.llm_base_url);
       setModel(s.llm_model);
+      setProtocol(s.llm_protocol || 'responses');
       setDemoMode(s.demo_mode);
+      setDailyCostBudget(s.daily_cost_budget || 5.0);
       setCharacterName(s.character_name);
       setCuriosity(s.curiosity_level);
       setNovelty(s.novelty_weight);
@@ -73,7 +80,9 @@ export const Settings: React.FC = () => {
       const updateData: any = {
         llm_base_url: baseUrl.trim(),
         llm_model: model.trim(),
+        llm_protocol: protocol,
         demo_mode: demoMode,
+        daily_cost_budget: dailyCostBudget,
         character_name: characterName.trim(),
         curiosity_level: curiosity,
         novelty_weight: novelty,
@@ -109,6 +118,28 @@ export const Settings: React.FC = () => {
       setToast('保存失败，请检查服务');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleTestConnection = async () => {
+    setTestingConnection(true);
+    setTestResult(null);
+    try {
+      const res = await api.testConnection({
+        base_url: baseUrl.trim(),
+        api_key: apiKey.trim() || undefined,
+        model: model.trim(),
+        protocol: protocol
+      });
+      setTestResult(res);
+    } catch (e: any) {
+      setTestResult({
+        success: false,
+        latency_ms: 0,
+        error_message: `测试请求异常: ${e.message || e}`
+      });
+    } finally {
+      setTestingConnection(false);
     }
   };
 
@@ -169,9 +200,37 @@ export const Settings: React.FC = () => {
 
         {/* Section 2: LLM Configuration */}
         <div className="card">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', color: 'var(--primary)' }}>
-            <Key size={20} />
-            <h3 style={{ fontSize: '16px', fontWeight: 'bold' }}>大语言模型设置（兼容 OpenAI API 格式）</h3>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--primary)' }}>
+              <Key size={20} />
+              <h3 style={{ fontSize: '16px', fontWeight: 'bold' }}>大语言模型设置（Aixoras / DeepSeek / OpenAI 兼容）</h3>
+            </div>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{ fontSize: '12px', padding: '4px 10px' }}
+                onClick={() => {
+                  setBaseUrl('https://api.aixoras.com/v1');
+                  setProtocol('responses');
+                  setModel('deepseek-chat');
+                }}
+              >
+                🌊 预设: Aixoras (推荐)
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{ fontSize: '12px', padding: '4px 10px' }}
+                onClick={() => {
+                  setBaseUrl('https://api.deepseek.com/v1');
+                  setProtocol('chat_completions');
+                  setModel('deepseek-chat');
+                }}
+              >
+                🐋 预设: DeepSeek 官方
+              </button>
+            </div>
           </div>
 
           <div className="grid-2">
@@ -184,29 +243,79 @@ export const Settings: React.FC = () => {
                 className="input"
                 value={baseUrl}
                 onChange={e => setBaseUrl(e.target.value)}
-                placeholder="例如: https://api.deepseek.com/v1"
+                placeholder="例如: https://api.aixoras.com/v1"
                 required
               />
             </div>
 
             <div>
               <label style={{ fontSize: '13px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '6px' }}>
-                模型名称 (Model)：
+                API 协议 (Protocol)：
+              </label>
+              <select
+                className="select"
+                value={protocol}
+                onChange={e => setProtocol(e.target.value)}
+                style={{ width: '100%' }}
+              >
+                <option value="responses">Responses API (/v1/responses，Aixoras 平台推荐)</option>
+                <option value="chat_completions">Chat Completions (/v1/chat/completions，OpenAI 标准)</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid-2" style={{ marginTop: '14px' }}>
+            <div>
+              <label style={{ fontSize: '13px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '6px' }}>
+                模型名称 (Model ID，非令牌分组名)：
+              </label>
+              <div style={{ display: 'flex', gap: '6px' }}>
+                <input
+                  type="text"
+                  className="input"
+                  value={model}
+                  onChange={e => setModel(e.target.value)}
+                  placeholder="例如: deepseek-chat 或 deepseek-reasoner"
+                  required
+                />
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ whiteSpace: 'nowrap', fontSize: '12px' }}
+                  onClick={() => setModel('deepseek-chat')}
+                >
+                  Chat
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ whiteSpace: 'nowrap', fontSize: '12px' }}
+                  onClick={() => setModel('deepseek-reasoner')}
+                >
+                  Reasoner
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label style={{ fontSize: '13px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '6px' }}>
+                每日 API 消耗预算上限 (¥ CNY)：
               </label>
               <input
-                type="text"
+                type="number"
+                step="0.5"
+                min="0.1"
+                max="100"
                 className="input"
-                value={model}
-                onChange={e => setModel(e.target.value)}
-                placeholder="例如: deepseek-chat"
-                required
+                value={dailyCostBudget}
+                onChange={e => setDailyCostBudget(parseFloat(e.target.value) || 5.0)}
               />
             </div>
           </div>
 
           <div style={{ marginTop: '14px' }}>
             <label style={{ fontSize: '13px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '6px' }}>
-              API 密钥 (Secret Key)：
+              API 密钥 (Secret Key - 本地 Windows DPAPI 加密防护)：
             </label>
             <div style={{ display: 'flex', gap: '8px' }}>
               <input
@@ -214,7 +323,7 @@ export const Settings: React.FC = () => {
                 className="input"
                 value={apiKey}
                 onChange={e => setApiKey(e.target.value)}
-                placeholder={settings?.has_api_key ? `已配置: ${settings.llm_api_key_masked} (输入新Key覆盖)` : '输入 sk-... 密钥'}
+                placeholder={settings?.has_api_key ? `已安全加密存储: ${settings.llm_api_key_masked} (输入新Key覆盖)` : '输入 sk-... 密钥'}
               />
               <button
                 type="button"
@@ -224,8 +333,49 @@ export const Settings: React.FC = () => {
               >
                 {showKey ? <EyeOff size={16} /> : <Eye size={16} />}
               </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                style={{ whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '6px' }}
+                onClick={handleTestConnection}
+                disabled={testingConnection}
+              >
+                <Zap size={16} />
+                {testingConnection ? '连接测试中...' : '测试连接'}
+              </button>
             </div>
           </div>
+
+          {/* Test Connection Live Result */}
+          {testResult && (
+            <div style={{
+              marginTop: '12px',
+              padding: '12px 16px',
+              borderRadius: '8px',
+              fontSize: '13px',
+              background: testResult.success ? '#f0fdf4' : '#fef2f2',
+              border: `1px solid ${testResult.success ? '#bbf7d0' : '#fecaca'}`,
+              color: testResult.success ? '#166534' : '#991b1b'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                <b>{testResult.success ? '✅ 连接成功！' : '❌ 连接失败'}</b>
+                <span style={{ fontSize: '12px', opacity: 0.8 }}>耗时: {testResult.latency_ms}ms</span>
+              </div>
+              {testResult.success ? (
+                <div>
+                  <p>模型回复: “{testResult.reply}”</p>
+                  <span style={{ fontSize: '11px', color: '#15803d' }}>
+                    协议: {testResult.protocol} | 模型: {testResult.model}
+                  </span>
+                </div>
+              ) : (
+                <div>
+                  <p>错误原因: {testResult.error_message}</p>
+                  {testResult.status_code && <span>HTTP 状态码: {testResult.status_code}</span>}
+                </div>
+              )}
+            </div>
+          )}
 
           <div style={{ marginTop: '14px', background: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', color: '#334155' }}>
@@ -234,7 +384,7 @@ export const Settings: React.FC = () => {
                 checked={demoMode}
                 onChange={e => setDemoMode(e.target.checked)}
               />
-              <span><b>启用内置仿真模式 (Demo Mode)：</b> 未配置有效 API Key 或脱机测试时，使用智能仿真思考逻辑。</span>
+              <span><b>启用内置仿真模式 (Demo Mode)：</b> 未配置有效 API Key 或脱机测试时，使用智能仿真思考逻辑。若关闭且配置了 Key，将直连模型并在失败时如实报错。</span>
             </label>
           </div>
         </div>

@@ -1,19 +1,31 @@
 from __future__ import annotations
 import json
 import re
-from typing import Dict, Any, Optional
+import time
+from typing import Dict, Any, Optional, List
 import httpx
 from backend.app.config import AppSettings, current_settings
+from backend.app.database import log_api_usage, get_daily_api_cost
+
+
+class LLMAPIError(Exception):
+    """Custom exception for LLM API connection, auth, or rate-limiting errors."""
+    def __init__(self, message: str, status_code: Optional[int] = None, details: Optional[str] = None):
+        super().__init__(message)
+        self.message = message
+        self.status_code = status_code
+        self.details = details or ""
 
 
 class LLMClient:
     def __init__(self, settings: Optional[AppSettings] = None):
         self.settings = settings or current_settings
 
-    def _get_headers(self) -> Dict[str, str]:
+    def _get_headers(self, custom_key: Optional[str] = None) -> Dict[str, str]:
+        key = custom_key if custom_key is not None else self.settings.llm_api_key
         headers = {"Content-Type": "application/json"}
-        if self.settings.llm_api_key:
-            headers["Authorization"] = f"Bearer {self.settings.llm_api_key}"
+        if key:
+            headers["Authorization"] = f"Bearer {key}"
         return headers
 
     async def chat_completion(
@@ -21,33 +33,296 @@ class LLMClient:
         messages: list[dict],
         temperature: float = 0.7,
         max_tokens: int = 1500,
-        response_json: bool = False
+        response_json: bool = False,
+        caller: str = "general"
     ) -> str:
-        # If in demo mode or no key is provided, return intelligent mock
+        # If in demo mode or no key configured, use intelligent mock
         if self.settings.demo_mode or not self.settings.llm_api_key:
             return self._mock_completion(messages, response_json)
 
+        # Safety Check 1: Emergency stop switch
+        if self.settings.emergency_stop:
+            raise LLMAPIError("紧急制动已触发：主人开启了紧急停止开关，大肥鱼已暂停所有 AI 自主调用。")
+
+        # Safety Check 2: Daily cost budget guard
+        today_cost = get_daily_api_cost()
+        if today_cost >= self.settings.daily_cost_budget:
+            raise LLMAPIError(
+                f"已达到今日 API 费用预算限制 (今日已消耗: ¥{today_cost:.3f} / 预算: ¥{self.settings.daily_cost_budget:.2f})，大肥鱼正在休养生息。"
+            )
+
         base_url = self.settings.llm_base_url.rstrip("/")
+        protocol = getattr(self.settings, "llm_protocol", "responses")
+        model = self.settings.llm_model
+
+        t_start = time.time()
+        try:
+            if protocol == "responses":
+                content, in_tok, out_tok = await self._call_responses_api(
+                    base_url=base_url,
+                    model=model,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    response_json=response_json
+                )
+            else:
+                content, in_tok, out_tok = await self._call_chat_completions_api(
+                    base_url=base_url,
+                    model=model,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    response_json=response_json
+                )
+
+            latency_ms = int((time.time() - t_start) * 1000)
+            log_api_usage(
+                model=model,
+                endpoint=f"{base_url}/{'responses' if protocol == 'responses' else 'chat/completions'}",
+                protocol=protocol,
+                input_tokens=in_tok,
+                output_tokens=out_tok,
+                caller=caller,
+                latency_ms=latency_ms,
+                status="success"
+            )
+            return content
+
+        except LLMAPIError as e:
+            latency_ms = int((time.time() - t_start) * 1000)
+            log_api_usage(
+                model=model,
+                endpoint=base_url,
+                protocol=protocol,
+                input_tokens=0,
+                output_tokens=0,
+                caller=caller,
+                latency_ms=latency_ms,
+                status="error",
+                error_message=f"{e.message} ({e.details})"[:200]
+            )
+            # CRITICAL REQUIREMENT: In real mode, NEVER silently fall back to fake mock generation!
+            raise
+
+        except Exception as e:
+            latency_ms = int((time.time() - t_start) * 1000)
+            err_msg = f"未知的网络或解析异常: {e}"
+            log_api_usage(
+                model=model,
+                endpoint=base_url,
+                protocol=protocol,
+                input_tokens=0,
+                output_tokens=0,
+                caller=caller,
+                latency_ms=latency_ms,
+                status="error",
+                error_message=err_msg[:200]
+            )
+            raise LLMAPIError(err_msg, details=str(e))
+
+    async def _call_responses_api(
+        self,
+        base_url: str,
+        model: str,
+        messages: list[dict],
+        temperature: float,
+        max_tokens: int,
+        response_json: bool,
+        custom_key: Optional[str] = None
+    ) -> tuple[str, int, int]:
+        """Call Aixoras /v1/responses endpoint."""
+        url = f"{base_url}/responses"
+        
+        # Split system instructions and user/conversation inputs
+        instructions = ""
+        user_parts = []
+        for m in messages:
+            role = m.get("role", "")
+            content = m.get("content", "")
+            if role == "system":
+                instructions += content + "\n"
+            else:
+                user_parts.append(f"{role.upper()}: {content}")
+
+        input_text = "\n\n".join(user_parts) if user_parts else "你好"
+
+        payload: Dict[str, Any] = {
+            "model": model,
+            "input": input_text,
+            "temperature": temperature,
+            "max_output_tokens": max_tokens,
+            "stream": False
+        }
+        if instructions.strip():
+            payload["instructions"] = instructions.strip()
+        if response_json:
+            payload["text"] = {"format": {"type": "json_object"}}
+
+        try:
+            async with httpx.AsyncClient(timeout=45.0) as client:
+                res = await client.post(url, headers=self._get_headers(custom_key), json=payload)
+                if res.status_code == 401 or res.status_code == 403:
+                    raise LLMAPIError("API 鉴权失败 (401/403): 请检查 API Key 是否正确或已启用", status_code=res.status_code)
+                if res.status_code == 429:
+                    raise LLMAPIError("API 速率限制 (429): 当前请求过多或已达平台限流配额", status_code=429)
+                if res.status_code == 404:
+                    raise LLMAPIError("API 端点未找到 (404): 该服务商可能不支持 /v1/responses 接口，请尝试切换为 Chat Completions 协议", status_code=404)
+                if res.status_code >= 500:
+                    raise LLMAPIError(f"服务商后端故障 ({res.status_code})", status_code=res.status_code, details=res.text[:200])
+
+                res.raise_for_status()
+                data = res.json()
+
+                # Extract content from Aixoras responses schema
+                # Structure: data["output"][0]["content"][0]["text"]
+                content = ""
+                output_list = data.get("output", [])
+                if isinstance(output_list, list) and len(output_list) > 0:
+                    item = output_list[0]
+                    c_list = item.get("content", [])
+                    if isinstance(c_list, list) and len(c_list) > 0:
+                        content = c_list[0].get("text", "")
+                    elif "text" in item:
+                        content = item["text"]
+                elif "choices" in data:
+                    content = data["choices"][0]["message"]["content"]
+                elif "text" in data:
+                    content = data["text"]
+
+                usage = data.get("usage", {})
+                in_tok = usage.get("input_tokens", usage.get("prompt_tokens", 0))
+                out_tok = usage.get("output_tokens", usage.get("completion_tokens", 0))
+
+                return content.strip(), in_tok, out_tok
+
+        except httpx.TimeoutException:
+            raise LLMAPIError("API 请求超时 (45s): 无法在规定时间内从 Aixoras 获得响应", status_code=408)
+        except httpx.ConnectError as e:
+            raise LLMAPIError(f"API 网络连接失败: 无法连接至 {base_url}", details=str(e))
+
+    async def _call_chat_completions_api(
+        self,
+        base_url: str,
+        model: str,
+        messages: list[dict],
+        temperature: float,
+        max_tokens: int,
+        response_json: bool,
+        custom_key: Optional[str] = None
+    ) -> tuple[str, int, int]:
+        """Call standard OpenAI /v1/chat/completions endpoint."""
         url = f"{base_url}/chat/completions"
-        payload = {
-            "model": self.settings.llm_model,
+        payload: Dict[str, Any] = {
+            "model": model,
             "messages": messages,
             "temperature": temperature,
-            "max_tokens": max_tokens,
+            "max_tokens": max_tokens
         }
         if response_json:
             payload["response_format"] = {"type": "json_object"}
 
         try:
             async with httpx.AsyncClient(timeout=45.0) as client:
-                res = await client.post(url, headers=self._get_headers(), json=payload)
+                res = await client.post(url, headers=self._get_headers(custom_key), json=payload)
+                if res.status_code in (401, 403):
+                    raise LLMAPIError("API 鉴权失败 (401/403): 请检查 API Key 是否有效", status_code=res.status_code)
+                if res.status_code == 429:
+                    raise LLMAPIError("API 速率限制 (429): 已触发服务商并发或配额限制", status_code=429)
+                if res.status_code == 404:
+                    raise LLMAPIError("API 端点未找到 (404): /chat/completions 不存在，请检查 Base URL", status_code=404)
+                if res.status_code >= 500:
+                    raise LLMAPIError(f"服务商后端故障 ({res.status_code})", status_code=res.status_code, details=res.text[:200])
+
                 res.raise_for_status()
                 data = res.json()
                 content = data["choices"][0]["message"]["content"]
-                return content
+                usage = data.get("usage", {})
+                in_tok = usage.get("prompt_tokens", 0)
+                out_tok = usage.get("completion_tokens", 0)
+                return content.strip(), in_tok, out_tok
+
+        except httpx.TimeoutException:
+            raise LLMAPIError("API 请求超时 (45s): 无法在规定时间内获得响应", status_code=408)
+        except httpx.ConnectError as e:
+            raise LLMAPIError(f"API 网络连接失败: 无法连接至 {base_url}", details=str(e))
+
+    async def test_connection(
+        self,
+        base_url: Optional[str] = None,
+        api_key: Optional[str] = None,
+        model: Optional[str] = None,
+        protocol: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Perform a real live connection test and return latency, model reply, and usage."""
+        test_base_url = (base_url or self.settings.llm_base_url).rstrip("/")
+        test_key = api_key if api_key is not None else self.settings.llm_api_key
+        test_model = model or self.settings.llm_model
+        test_protocol = protocol or getattr(self.settings, "llm_protocol", "responses")
+
+        if not test_key:
+            return {
+                "success": False,
+                "latency_ms": 0,
+                "error_message": "测试失败：未提供 API Key，请在输入框填入密钥后测试。",
+                "status_code": 400
+            }
+
+        messages = [
+            {"role": "system", "content": "你是一只叫大肥鱼的AI小鲸鱼助手。"},
+            {"role": "user", "content": "请用简短的一句话（20字以内）回复：大肥鱼已连接成功！"}
+        ]
+
+        t_start = time.time()
+        try:
+            if test_protocol == "responses":
+                content, in_tok, out_tok = await self._call_responses_api(
+                    base_url=test_base_url,
+                    model=test_model,
+                    messages=messages,
+                    temperature=0.3,
+                    max_tokens=60,
+                    response_json=False,
+                    custom_key=test_key
+                )
+            else:
+                content, in_tok, out_tok = await self._call_chat_completions_api(
+                    base_url=test_base_url,
+                    model=test_model,
+                    messages=messages,
+                    temperature=0.3,
+                    max_tokens=60,
+                    response_json=False,
+                    custom_key=test_key
+                )
+
+            latency_ms = int((time.time() - t_start) * 1000)
+            return {
+                "success": True,
+                "latency_ms": latency_ms,
+                "reply": content,
+                "model": test_model,
+                "protocol": test_protocol,
+                "tokens": {"input": in_tok, "output": out_tok, "total": in_tok + out_tok}
+            }
+        except LLMAPIError as e:
+            latency_ms = int((time.time() - t_start) * 1000)
+            return {
+                "success": False,
+                "latency_ms": latency_ms,
+                "error_message": e.message,
+                "status_code": e.status_code,
+                "details": e.details
+            }
         except Exception as e:
-            print(f"[LLMClient] API error: {e}. Falling back to demo mock generation.")
-            return self._mock_completion(messages, response_json)
+            latency_ms = int((time.time() - t_start) * 1000)
+            return {
+                "success": False,
+                "latency_ms": latency_ms,
+                "error_message": f"连接错误: {e}",
+                "status_code": None,
+                "details": str(e)
+            }
 
     def _mock_completion(self, messages: list[dict], response_json: bool) -> str:
         # Extract system and user prompts
@@ -61,7 +336,6 @@ class LLMClient:
 
         # Video Analysis Mock Response
         if "视频分析" in system_content or "Video Analysis" in system_content or "summary" in user_content.lower():
-            # Parse video title if possible
             title_match = re.search(r"标题[：:]\s*(.+)", user_content)
             title = title_match.group(1).strip() if title_match else "这个有趣的B站视频"
             

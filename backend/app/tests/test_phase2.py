@@ -17,11 +17,16 @@ from backend.app.services.bilibili_source import BilibiliSource
 def test_secret_protection():
     raw_key = "sk-test-secret-key-1234567890"
     protected = protect_secret(raw_key)
-    assert protected.startswith("enc:")
+    # On Windows, must use Windows DPAPI
+    assert protected.startswith("dpapi:") or protected.startswith("enc:")
     assert protected != raw_key
 
     recovered = unprotect_secret(protected)
     assert recovered == raw_key
+
+    # Also test backward compatibility with legacy machine-salt XOR 'enc:' prefix
+    legacy_enc = "enc:e30="
+    assert unprotect_secret(legacy_enc) is not None
 
 
 def test_comment_decision_engine_rules():

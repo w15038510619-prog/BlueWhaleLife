@@ -106,5 +106,11 @@ export const api = {
   updateSettings: (data: any) => request<SettingsResponse>('/api/settings', {
     method: 'POST',
     body: JSON.stringify(data)
-  })
+  }),
+  testConnection: (data: { base_url?: string; api_key?: string; model?: string; protocol?: string }) =>
+    request<{ success: boolean; latency_ms: number; reply?: string; model?: string; protocol?: string; error_message?: string; status_code?: number; details?: string }>('/api/settings/test-connection', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    }),
+  getUsage: () => request<{ today_cost_cny: number; total_calls: number; total_tokens: number; all_time_cost_cny: number; recent_logs: any[] }>('/api/settings/usage')
 };

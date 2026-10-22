@@ -117,9 +117,11 @@ export interface CommentPublication {
 export interface SettingsResponse {
   llm_base_url: string;
   llm_model: string;
+  llm_protocol: string;
   llm_api_key_masked: string;
   has_api_key: boolean;
   demo_mode: boolean;
+  daily_cost_budget: number;
   character_name: string;
   curiosity_level: number;
   novelty_weight: number;

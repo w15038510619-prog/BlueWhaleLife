@@ -18,10 +18,53 @@ CONFIG_FILE = DATA_DIR / "config.json"
 DEFAULT_DB_FILE = DATA_DIR / "whale_life.db"
 
 
-def _get_machine_salt() -> bytes:
-    """Generate a stable machine-bound salt for local secret obfuscation."""
+import ctypes
+from ctypes import wintypes
+
+class _DATA_BLOB(ctypes.Structure):
+    _fields_ = [('cbData', wintypes.DWORD), ('pbData', ctypes.POINTER(ctypes.c_byte))]
+
+_DPAPI_ENTROPY = b"BlueWhaleLife-DPAPI-Entropy-2026"
+
+
+def _win_dpapi_encrypt(data: bytes) -> bytes:
+    """Encrypt byte payload using Windows Data Protection API (DPAPI)."""
     try:
-        # Use Windows computer name / user name / system drive serial if available
+        crypt32 = ctypes.windll.crypt32
+        kernel32 = ctypes.windll.kernel32
+        in_blob = _DATA_BLOB(len(data), ctypes.cast(ctypes.create_string_buffer(data), ctypes.POINTER(ctypes.c_byte)))
+        ent_blob = _DATA_BLOB(len(_DPAPI_ENTROPY), ctypes.cast(ctypes.create_string_buffer(_DPAPI_ENTROPY), ctypes.POINTER(ctypes.c_byte)))
+        out_blob = _DATA_BLOB()
+        # CRYPTPROTECT_UI_FORBIDDEN = 0x1
+        if not crypt32.CryptProtectData(ctypes.byref(in_blob), 'BlueWhaleLifeKey', ctypes.byref(ent_blob), None, None, 0x1, ctypes.byref(out_blob)):
+            return b""
+        res = ctypes.string_at(out_blob.pbData, out_blob.cbData)
+        kernel32.LocalFree(out_blob.pbData)
+        return res
+    except Exception:
+        return b""
+
+
+def _win_dpapi_decrypt(cipher: bytes) -> bytes:
+    """Decrypt byte payload using Windows Data Protection API (DPAPI)."""
+    try:
+        crypt32 = ctypes.windll.crypt32
+        kernel32 = ctypes.windll.kernel32
+        in_blob = _DATA_BLOB(len(cipher), ctypes.cast(ctypes.create_string_buffer(cipher), ctypes.POINTER(ctypes.c_byte)))
+        ent_blob = _DATA_BLOB(len(_DPAPI_ENTROPY), ctypes.cast(ctypes.create_string_buffer(_DPAPI_ENTROPY), ctypes.POINTER(ctypes.c_byte)))
+        out_blob = _DATA_BLOB()
+        if not crypt32.CryptUnprotectData(ctypes.byref(in_blob), None, ctypes.byref(ent_blob), None, None, 0x1, ctypes.byref(out_blob)):
+            return b""
+        res = ctypes.string_at(out_blob.pbData, out_blob.cbData)
+        kernel32.LocalFree(out_blob.pbData)
+        return res
+    except Exception:
+        return b""
+
+
+def _get_machine_salt() -> bytes:
+    """Generate a stable machine-bound salt for local secret obfuscation fallback."""
+    try:
         ident = f"{os.environ.get('COMPUTERNAME', '')}-{os.environ.get('USERNAME', '')}-BlueWhaleLife-2026"
         return hashlib.sha256(ident.encode("utf-8")).digest()
     except Exception:
@@ -29,11 +72,17 @@ def _get_machine_salt() -> bytes:
 
 
 def protect_secret(plaintext: str) -> str:
-    """Reversible machine-bound protection to prevent plaintext key exposure in plain text."""
+    """
+    Encrypt secret key securely using Windows DPAPI if on Windows.
+    Falls back to reversible machine-bound salt if DPAPI is unavailable.
+    """
     if not plaintext:
         return ""
+    if os.name == "nt":
+        enc = _win_dpapi_encrypt(plaintext.encode("utf-8"))
+        if enc:
+            return "dpapi:" + base64.b64encode(enc).decode("ascii")
     try:
-        # If Windows DPAPI is available via win32crypt or ctypes, we can use it, or XOR with machine hash
         salt = _get_machine_salt()
         data_bytes = plaintext.encode("utf-8")
         obfuscated = bytes([b ^ salt[i % len(salt)] for i, b in enumerate(data_bytes)])
@@ -43,26 +92,37 @@ def protect_secret(plaintext: str) -> str:
 
 
 def unprotect_secret(ciphertext: str) -> str:
-    """Reverse machine-bound protection."""
+    """
+    Decrypt secret key supporting Windows DPAPI ('dpapi:') and legacy salt XOR ('enc:').
+    """
     if not ciphertext:
         return ""
-    if not ciphertext.startswith("enc:"):
-        return ciphertext
-    try:
-        salt = _get_machine_salt()
-        raw = base64.b64decode(ciphertext[4:].encode("ascii"))
-        recovered = bytes([b ^ salt[i % len(salt)] for i, b in enumerate(raw)])
-        return recovered.decode("utf-8")
-    except Exception:
-        return ""
+    if ciphertext.startswith("dpapi:"):
+        try:
+            raw = base64.b64decode(ciphertext[6:].encode("ascii"))
+            dec = _win_dpapi_decrypt(raw)
+            return dec.decode("utf-8", errors="ignore")
+        except Exception:
+            return ""
+    if ciphertext.startswith("enc:"):
+        try:
+            salt = _get_machine_salt()
+            raw = base64.b64decode(ciphertext[4:].encode("ascii"))
+            recovered = bytes([b ^ salt[i % len(salt)] for i, b in enumerate(raw)])
+            return recovered.decode("utf-8")
+        except Exception:
+            return ""
+    return ciphertext
 
 
 class AppSettings(BaseModel):
-    # LLM Settings (OpenAI-compatible, e.g. DeepSeek, OpenAI, Moonshot, etc.)
-    llm_base_url: str = Field(default="https://api.deepseek.com/v1", description="OpenAI-compatible API Base URL")
-    llm_model: str = Field(default="deepseek-chat", description="Model name")
-    llm_api_key_protected: str = Field(default="", description="Machine-protected API key")
+    # LLM Settings (Aixoras / DeepSeek / OpenAI-compatible)
+    llm_base_url: str = Field(default="https://api.aixoras.com/v1", description="API Base URL (e.g. https://api.aixoras.com/v1 or https://api.deepseek.com/v1)")
+    llm_model: str = Field(default="deepseek-chat", description="Model name (e.g. deepseek-chat, deepseek-reasoner)")
+    llm_protocol: str = Field(default="responses", description="API protocol: 'responses' (Aixoras recommended) or 'chat_completions' (OpenAI compatible)")
+    llm_api_key_protected: str = Field(default="", description="Windows DPAPI protected API key")
     demo_mode: bool = Field(default=True, description="When true or if api_key is empty, uses intelligent mock simulation")
+    daily_cost_budget: float = Field(default=5.0, ge=0.0001, le=1000.0, description="Daily LLM cost budget in CNY")
 
     # Character Settings
     character_name: str = Field(default="大肥鱼", description="Name of the AI fish")
@@ -143,6 +203,11 @@ def load_settings() -> AppSettings:
                 # Handle migration from old plaintext llm_api_key if present
                 if "llm_api_key" in data and not data.get("llm_api_key_protected"):
                     data["llm_api_key_protected"] = protect_secret(data.pop("llm_api_key", ""))
+                # Auto-upgrade from legacy machine-salt XOR 'enc:' to Windows DPAPI 'dpapi:'
+                if data.get("llm_api_key_protected", "").startswith("enc:"):
+                    raw_secret = unprotect_secret(data["llm_api_key_protected"])
+                    if raw_secret:
+                        data["llm_api_key_protected"] = protect_secret(raw_secret)
                 return AppSettings(**data)
         except Exception as e:
             print(f"[Config] Error loading {CONFIG_FILE}: {e}, using default settings")

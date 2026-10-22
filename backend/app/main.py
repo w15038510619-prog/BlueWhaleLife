@@ -55,6 +55,29 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def local_origin_security_middleware(request, call_next):
+    """Enforce origin security for local API state mutations."""
+    if request.url.path.startswith("/api/") and request.method in ("POST", "PUT", "DELETE"):
+        origin = request.headers.get("origin")
+        if origin:
+            allowed = current_settings.cors_origins + ["http://127.0.0.1", "http://localhost"]
+            if not any(origin.startswith(a) for a in allowed):
+                from fastapi.responses import JSONResponse
+                return JSONResponse(status_code=403, content={"detail": "Forbidden Origin: Untrusted cross-origin request rejected"})
+    return await call_next(request)
+
+
+def _validate_base_url(url: str):
+    """Prevent SSRF attacks by blocking invalid protocols and cloud metadata IPs."""
+    url_lower = url.strip().lower()
+    if not (url_lower.startswith("http://") or url_lower.startswith("https://")):
+        raise HTTPException(status_code=400, detail="Invalid API Base URL: 必须以 http:// 或 https:// 开头")
+    blocked = ["169.254.169.254", "metadata.google.internal", "metadata.azure.com", "instance-data"]
+    if any(b in url_lower for b in blocked):
+        raise HTTPException(status_code=400, detail="Forbidden API Base URL: 禁止访问云实例元数据地址")
+
+
 # --- 1. Pet & Character Endpoints ---
 
 @app.get("/api/pet/status", response_model=PetStatus)
@@ -332,9 +355,11 @@ async def trigger_scheduler_cycle():
 class SettingsResponse(BaseModel):
     llm_base_url: str
     llm_model: str
+    llm_protocol: str
     llm_api_key_masked: str
     has_api_key: bool
     demo_mode: bool
+    daily_cost_budget: float
     character_name: str
     curiosity_level: float
     novelty_weight: float
@@ -360,8 +385,10 @@ class SettingsResponse(BaseModel):
 class SettingsUpdateRequest(BaseModel):
     llm_base_url: Optional[str] = None
     llm_model: Optional[str] = None
+    llm_protocol: Optional[str] = None
     llm_api_key: Optional[str] = None
     demo_mode: Optional[bool] = None
+    daily_cost_budget: Optional[float] = None
     character_name: Optional[str] = None
     curiosity_level: Optional[float] = None
     novelty_weight: Optional[float] = None
@@ -387,9 +414,11 @@ def get_settings():
     return SettingsResponse(
         llm_base_url=current_settings.llm_base_url,
         llm_model=current_settings.llm_model,
+        llm_protocol=getattr(current_settings, "llm_protocol", "responses"),
         llm_api_key_masked=current_settings.masked_api_key(),
         has_api_key=bool(current_settings.llm_api_key),
         demo_mode=current_settings.demo_mode,
+        daily_cost_budget=getattr(current_settings, "daily_cost_budget", 5.0),
         character_name=current_settings.character_name,
         curiosity_level=current_settings.curiosity_level,
         novelty_weight=current_settings.novelty_weight,
@@ -411,15 +440,49 @@ def get_settings():
     )
 
 
+class TestConnectionRequest(BaseModel):
+    base_url: Optional[str] = None
+    api_key: Optional[str] = None
+    model: Optional[str] = None
+    protocol: Optional[str] = None
+
+
+@app.post("/api/settings/test-connection")
+async def test_llm_connection(req: TestConnectionRequest = None):
+    req = req or TestConnectionRequest()
+    if req.base_url:
+        _validate_base_url(req.base_url)
+    client = LLMClient()
+    result = await client.test_connection(
+        base_url=req.base_url,
+        api_key=req.api_key,
+        model=req.model,
+        protocol=req.protocol
+    )
+    return result
+
+
+@app.get("/api/settings/usage")
+def get_llm_usage():
+    from backend.app.database import get_api_usage_summary
+    return get_api_usage_summary()
+
+
 @app.post("/api/settings", response_model=SettingsResponse)
 def update_settings(req: SettingsUpdateRequest):
     if req.llm_base_url is not None:
+        _validate_base_url(req.llm_base_url)
         current_settings.llm_base_url = req.llm_base_url
     if req.llm_model is not None:
         current_settings.llm_model = req.llm_model
+    if req.llm_protocol is not None:
+        current_settings.llm_protocol = req.llm_protocol
+    if req.daily_cost_budget is not None:
+        current_settings.daily_cost_budget = req.daily_cost_budget
     if req.llm_api_key is not None:
         current_settings.llm_api_key = req.llm_api_key
         if req.llm_api_key and req.demo_mode is None:
+            current_settings.demo_mode = False
             current_settings.demo_mode = False
     if req.demo_mode is not None:
         current_settings.demo_mode = req.demo_mode

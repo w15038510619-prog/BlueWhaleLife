@@ -48,7 +48,12 @@ a = Analysis(
         'backend.app.services.scheduler',
         'desktop_pet',
         'desktop_pet.pet_window',
-        'desktop_pet.fish_renderer'
+        'desktop_pet.fish_renderer',
+        'desktop_pet.speech_bubble',
+        'desktop_pet.chat_dialog',
+        'desktop_pet.virtual_bin_marker',
+        'desktop_pet.recycle_bin_helper',
+        'send2trash'
     ],
     hookspath=[],
     hooksconfig={},
