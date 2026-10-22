@@ -5,7 +5,9 @@ import {
   KnowledgeNote,
   ReflectionLog,
   PersonalityState,
-  SettingsResponse
+  SettingsResponse,
+  SchedulerStatus,
+  CommentPublication
 } from '../types';
 
 const BASE_URL = '';
@@ -32,6 +34,7 @@ export const api = {
     method: 'POST',
     body: JSON.stringify({ message })
   }),
+  getChatHistory: () => request<any[]>('/api/chat/history'),
 
   // Discovery
   explore: (forceRefresh = false) => request<VideoCandidate[]>(`/api/discovery/explore?force_refresh=${forceRefresh}`, {
@@ -42,19 +45,29 @@ export const api = {
     method: 'POST'
   }),
 
-  // Video Diaries
+  // Video Diaries & Comments
   getVideos: () => request<VideoAnalysis[]>('/api/videos'),
   getVideo: (bvid: string) => request<VideoAnalysis>(`/api/videos/${bvid}`),
-  updateDraft: (bvid: string, draft_status?: string, comment_draft?: string, user_notes?: string) =>
+  updateDraft: (bvid: string, draft_status?: string, comment_draft?: string, user_notes?: string, publisher_type?: string) =>
     request<VideoAnalysis>(`/api/videos/${bvid}/draft`, {
       method: 'PATCH',
-      body: JSON.stringify({ draft_status, comment_draft, user_notes })
+      body: JSON.stringify({ draft_status, comment_draft, user_notes, publisher_type })
     }),
-  analyzeCustomVideo: (data: { bvid: string; title: string; author?: string; description?: string; tags?: string[] }) =>
+  analyzeCustomVideo: (data: { bvid: string; title?: string; author?: string; description?: string; tags?: string[] }) =>
     request<VideoAnalysis>('/api/videos/analyze', {
       method: 'POST',
       body: JSON.stringify(data)
     }),
+  publishComment: (bvid: string) => request<any>(`/api/comments/${bvid}/publish`, {
+    method: 'POST'
+  }),
+  getCommentPublications: () => request<CommentPublication[]>('/api/comments/publications'),
+
+  // Autonomous Life Scheduler
+  getSchedulerStatus: () => request<SchedulerStatus>('/api/scheduler/status'),
+  triggerSchedulerCycle: () => request<{ status: string; result: string }>('/api/scheduler/trigger', {
+    method: 'POST'
+  }),
 
   // Memory & Knowledge Notes
   getKnowledgeNotes: (activeOnly = true) => request<KnowledgeNote[]>(`/api/memory/notes?active_only=${activeOnly}`),
@@ -74,7 +87,7 @@ export const api = {
   deduplicateNotes: () => request<{ status: string; merged_count: number }>('/api/memory/deduplicate', {
     method: 'POST'
   }),
-  searchMemories: (q: string) => request<{ query: string; notes: KnowledgeNote[]; watches: any[] }>(`/api/memory/search?q=${encodeURIComponent(q)}`),
+  searchMemories: (q: string) => request<{ query: string; notes: KnowledgeNote[]; videos: VideoAnalysis[] }>(`/api/memory/search?q=${encodeURIComponent(q)}`),
 
   // Personality & Reflection
   getSoulCurrent: () => request<PersonalityState>('/api/soul/current'),

@@ -1,12 +1,17 @@
 from __future__ import annotations
+import sys
 import os
-from typing import List, Optional
+from pathlib import Path
+from contextlib import asynccontextmanager
+from typing import List, Optional, Dict, Any
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from backend.app.config import current_settings, save_settings, AppSettings
-from backend.app.database import init_db
+from backend.app.database import init_db, get_db_connection
 from backend.app.models.video import VideoCandidate, VideoAnalysis, UpdateDraftRequest, AnalyzeVideoRequest
 from backend.app.models.memory import KnowledgeNote, KnowledgeNoteCreate, KnowledgeNoteUpdate, ReflectionLog, MemorySearchResult
 from backend.app.models.persona import PersonalityState, PetStatus, ChatRequest, ChatResponse
@@ -17,20 +22,33 @@ from backend.app.services.analyzer import VideoAnalyzer
 from backend.app.services.reflection import ReflectionEngine
 from backend.app.services.bilibili_source import BilibiliSource
 from backend.app.services.llm_client import LLMClient
+from backend.app.services.publisher import CommentDecisionEngine, CommentPublishRequest
+from backend.app.services.scheduler import AutonomousScheduler
 
-# Initialize database on startup
+# Initialize database and migrate schema on startup
 init_db()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Start autonomous scheduler loop
+    AutonomousScheduler.start()
+    yield
+    # Shutdown: Cleanly stop scheduler
+    AutonomousScheduler.stop()
+
 
 app = FastAPI(
     title="BlueWhaleLife API - 大肥鱼的B站生活",
-    description="自主探索、独立思考、长期记忆与成长的 Windows 开源 AI 角色养成后端",
-    version="1.0.0"
+    description="自主探索、独立思考、分级多模态理解与自主评论的 Windows 开源 AI 角色养成后端",
+    version="2.0.0",
+    lifespan=lifespan
 )
 
-# CORS configuration
+# CORS configuration - strictly bound to trusted local origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=current_settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -51,14 +69,24 @@ async def pet_chat(req: ChatRequest):
         raise HTTPException(status_code=400, detail="消息内容不能为空")
 
     state = SoulEngine.get_current_state()
+
     # Search memory to see if relevant context exists
     memories = MemoryService.search_memories(user_msg, limit=2)
     memory_hint = ""
     if memories.notes:
         memory_hint = f"（记忆库中有关于此的信息：{memories.notes[0].content[:80]}）"
 
+    # Get recent conversation history for continuity
+    past_history = MemoryService.get_recent_chat_history(limit=6)
+    history_context = ""
+    if past_history:
+        history_context = "【近期与主人的对话上下文】\n"
+        for h in past_history:
+            sender = "主人" if h["role"] == "user" else "大肥鱼"
+            history_context += f"{sender}: {h['content']}\n"
+
     system_prompt = f"""
-你是主人养在电脑里的 AI 小肥鱼【大肥鱼】。
+你是主人养在电脑里的 AI 小肥鱼【大肥鱼】（Whale Musume，身穿女仆装、长着萌萌鲸鱼尾巴的小鲸鱼）。
 你的性格特点：
 - 好奇心强，喜欢学习新知识。
 - 活泼可爱，但不过度卖萌，绝不油腻。
@@ -66,10 +94,11 @@ async def pet_chat(req: ChatRequest):
 - 不知道的事情可以直接承认，绝不不懂装懂。
 - 喜欢科学、技术、自然、独立游戏和生活冷知识。
 - 称呼对方为“主人”，语气自然亲近。
-- 【重要】：你是一只生活在虚拟鱼缸/桌宠里的小鲸鱼，心情和成长值属于角色模拟，不表现为真实人类肉身意识。
+- 【重要】：你生活在虚拟鱼缸/桌宠里，心情和成长值属于角色模拟，不表现为真实人类肉身意识。
 
 当前性格偏好：{state.traits}
 相关记忆提示：{memory_hint}
+{history_context}
 """.strip()
 
     client = LLMClient()
@@ -81,6 +110,10 @@ async def pet_chat(req: ChatRequest):
         temperature=0.75
     )
 
+    # Persist conversation to memory
+    MemoryService.record_chat_message(role="user", content=user_msg)
+    MemoryService.record_chat_message(role="assistant", content=reply, pet_state="happy", mood="开心且有表达欲")
+
     return ChatResponse(
         reply=reply,
         pet_state="happy",
@@ -88,14 +121,19 @@ async def pet_chat(req: ChatRequest):
     )
 
 
-# --- 2. Discovery & Exploration Endpoints ---
+@app.get("/api/chat/history")
+def get_chat_history(limit: int = 30):
+    return MemoryService.get_recent_chat_history(limit=limit)
+
+
+# --- 2. Discovery & Autonomous Exploration Endpoints ---
 
 @app.post("/api/discovery/explore", response_model=List[VideoCandidate])
-def explore_content(force_refresh: bool = False):
+async def explore_content(force_refresh: bool = False):
     """
     '出去逛逛'：触发自主探索，根据当前兴趣偏好与新颖度生成推荐列表与选择理由
     """
-    return DiscoveryEngine.explore(force_refresh=force_refresh)
+    return await DiscoveryEngine.explore(force_refresh=force_refresh)
 
 
 @app.get("/api/discovery/candidates", response_model=List[VideoCandidate])
@@ -106,11 +144,14 @@ def get_candidates(limit: int = 20):
 @app.post("/api/discovery/watch/{bvid}", response_model=VideoAnalysis)
 async def watch_candidate(bvid: str):
     """
-    大肥鱼开始观看并分析指定视频
+    大肥鱼开始观看并分析指定视频（分级理解：元数据 -> 字幕 -> 证据映射）
     """
     details = await BilibiliSource.fetch_video_details(bvid)
-    if not details:
-        raise HTTPException(status_code=404, detail="无法获取该视频信息")
+    if not details or not details.get("is_valid", True):
+        raise HTTPException(
+            status_code=404,
+            detail=details.get("failure_reason", "无法获取该视频信息或视频已失效") if details else "无法连接B站接口获取视频信息"
+        )
 
     req = AnalyzeVideoRequest(
         bvid=bvid,
@@ -119,9 +160,10 @@ async def watch_candidate(bvid: str):
         cover=details.get("cover", ""),
         description=details.get("description", ""),
         tags=details.get("tags", []),
-        choice_reason=details.get("reason", "自主探索中被标题吸引")
+        subtitles=details.get("subtitles_text", ""),
+        choice_reason=details.get("reason", "自主探索中被切入点吸引")
     )
-    analysis = await VideoAnalyzer.analyze_video(req)
+    analysis = await VideoAnalyzer.analyze_video(req, details=details)
     return analysis
 
 
@@ -153,11 +195,50 @@ async def analyze_custom_video(req: AnalyzeVideoRequest):
     """
     用户手动输入 BV 号或视频元数据让大肥鱼分析
     """
-    analysis = await VideoAnalyzer.analyze_video(req)
+    details = await BilibiliSource.fetch_video_details(req.bvid)
+    analysis = await VideoAnalyzer.analyze_video(req, details=details)
     return analysis
 
 
-# --- 4. Long-Term Memory & Knowledge Endpoints ---
+# --- 4. Autonomous Comment Publishing Endpoints ---
+
+@app.get("/api/comments/publications")
+def get_comment_publications(limit: int = 50):
+    """Get audit logs of all published or attempted comments."""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT * FROM comment_publications
+            ORDER BY id DESC LIMIT ?
+        """, (limit,))
+        rows = cursor.fetchall()
+        return [dict(r) for r in rows]
+
+
+@app.post("/api/comments/{bvid}/publish")
+async def trigger_publish_comment(bvid: str):
+    """
+    Trigger manual or approved publication of an existing comment draft.
+    """
+    video = MemoryService.get_watch_by_bvid(bvid)
+    if not video:
+        raise HTTPException(status_code=404, detail="未找到该观影记录")
+    if not video.comment_draft.strip():
+        raise HTTPException(status_code=400, detail="该视频尚无有效评论草稿")
+
+    pub_req = CommentPublishRequest(
+        bvid=bvid,
+        comment_text=video.comment_draft,
+        viewpoint=video.viewpoint,
+        learned=video.learned,
+        comprehension_tier=video.comprehension_tier,
+        is_partial=video.is_partial
+    )
+    result = await CommentDecisionEngine.dispatch_publisher(pub_req)
+    return result
+
+
+# --- 5. Long-Term Memory & Knowledge Endpoints ---
 
 @app.get("/api/memory/notes", response_model=List[KnowledgeNote])
 def get_knowledge_notes(active_only: bool = True, limit: int = 100):
@@ -196,7 +277,7 @@ def search_memories(q: str = Query(..., min_length=1)):
     return MemoryService.search_memories(q)
 
 
-# --- 5. Soul & Daily Reflection Endpoints ---
+# --- 6. Soul & Daily Reflection Endpoints ---
 
 @app.get("/api/soul/current", response_model=PersonalityState)
 def get_current_soul():
@@ -233,7 +314,20 @@ def get_reflection_logs(limit: int = 30):
     return ReflectionEngine.get_reflection_logs(limit=limit)
 
 
-# --- 6. Settings Endpoints ---
+# --- 7. Autonomous Life Scheduler Endpoints ---
+
+@app.get("/api/scheduler/status")
+def get_scheduler_status():
+    return AutonomousScheduler.get_status()
+
+
+@app.post("/api/scheduler/trigger")
+async def trigger_scheduler_cycle():
+    result = await AutonomousScheduler.run_autonomous_cycle()
+    return {"status": "success", "result": result}
+
+
+# --- 8. Settings Endpoints ---
 
 class SettingsResponse(BaseModel):
     llm_base_url: str
@@ -246,6 +340,22 @@ class SettingsResponse(BaseModel):
     novelty_weight: float
     backend_port: int
 
+    # Publisher & Autonomous Settings
+    publisher_type: str
+    has_bilibili_token: bool
+    bilibili_token_masked: str
+    webhook_url: str
+    emergency_stop: bool
+    max_comments_per_day: int
+    auto_comment_enabled: bool
+
+    # Scheduler Settings
+    scheduler_enabled: bool
+    scheduler_interval_minutes: int
+    quiet_hours_start: int
+    quiet_hours_end: int
+    daily_explore_budget: int
+
 
 class SettingsUpdateRequest(BaseModel):
     llm_base_url: Optional[str] = None
@@ -255,6 +365,21 @@ class SettingsUpdateRequest(BaseModel):
     character_name: Optional[str] = None
     curiosity_level: Optional[float] = None
     novelty_weight: Optional[float] = None
+
+    # Publisher & Autonomous Settings
+    publisher_type: Optional[str] = None
+    bilibili_access_token: Optional[str] = None
+    webhook_url: Optional[str] = None
+    emergency_stop: Optional[bool] = None
+    max_comments_per_day: Optional[int] = None
+    auto_comment_enabled: Optional[bool] = None
+
+    # Scheduler Settings
+    scheduler_enabled: Optional[bool] = None
+    scheduler_interval_minutes: Optional[int] = None
+    quiet_hours_start: Optional[int] = None
+    quiet_hours_end: Optional[int] = None
+    daily_explore_budget: Optional[int] = None
 
 
 @app.get("/api/settings", response_model=SettingsResponse)
@@ -268,7 +393,21 @@ def get_settings():
         character_name=current_settings.character_name,
         curiosity_level=current_settings.curiosity_level,
         novelty_weight=current_settings.novelty_weight,
-        backend_port=current_settings.backend_port
+        backend_port=current_settings.backend_port,
+
+        publisher_type=current_settings.publisher_type,
+        has_bilibili_token=bool(current_settings.bilibili_access_token),
+        bilibili_token_masked=current_settings.masked_bilibili_token(),
+        webhook_url=current_settings.webhook_url,
+        emergency_stop=current_settings.emergency_stop,
+        max_comments_per_day=current_settings.max_comments_per_day,
+        auto_comment_enabled=current_settings.auto_comment_enabled,
+
+        scheduler_enabled=current_settings.scheduler_enabled,
+        scheduler_interval_minutes=current_settings.scheduler_interval_minutes,
+        quiet_hours_start=current_settings.quiet_hours_start,
+        quiet_hours_end=current_settings.quiet_hours_end,
+        daily_explore_budget=current_settings.daily_explore_budget
     )
 
 
@@ -281,7 +420,6 @@ def update_settings(req: SettingsUpdateRequest):
     if req.llm_api_key is not None:
         current_settings.llm_api_key = req.llm_api_key
         if req.llm_api_key and req.demo_mode is None:
-            # If user provides a key and didn't explicitly set demo_mode, switch demo_mode off
             current_settings.demo_mode = False
     if req.demo_mode is not None:
         current_settings.demo_mode = req.demo_mode
@@ -292,25 +430,47 @@ def update_settings(req: SettingsUpdateRequest):
     if req.novelty_weight is not None:
         current_settings.novelty_weight = req.novelty_weight
 
+    # Publisher & Scheduler
+    if req.publisher_type is not None:
+        current_settings.publisher_type = req.publisher_type
+    if req.bilibili_access_token is not None:
+        current_settings.bilibili_access_token = req.bilibili_access_token
+    if req.webhook_url is not None:
+        current_settings.webhook_url = req.webhook_url
+    if req.emergency_stop is not None:
+        current_settings.emergency_stop = req.emergency_stop
+    if req.max_comments_per_day is not None:
+        current_settings.max_comments_per_day = req.max_comments_per_day
+    if req.auto_comment_enabled is not None:
+        current_settings.auto_comment_enabled = req.auto_comment_enabled
+
+    if req.scheduler_enabled is not None:
+        current_settings.scheduler_enabled = req.scheduler_enabled
+    if req.scheduler_interval_minutes is not None:
+        current_settings.scheduler_interval_minutes = req.scheduler_interval_minutes
+    if req.quiet_hours_start is not None:
+        current_settings.quiet_hours_start = req.quiet_hours_start
+    if req.quiet_hours_end is not None:
+        current_settings.quiet_hours_end = req.quiet_hours_end
+    if req.daily_explore_budget is not None:
+        current_settings.daily_explore_budget = req.daily_explore_budget
+
     save_settings(current_settings)
     return get_settings()
 
 
 @app.get("/api/health")
 def health_check():
-    return {"status": "ok", "app": "BlueWhaleLife", "version": "1.0.0"}
+    return {"status": "ok", "app": "BlueWhaleLife", "version": "2.0.0"}
 
 
-# --- 7. Static Frontend Mounting & SPA Fallback ---
-import sys
-from pathlib import Path
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+# --- 9. Static Frontend Mounting & SPA Fallback ---
 
 if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
     FRONTEND_DIST = Path(sys._MEIPASS) / "frontend" / "dist"
 else:
     FRONTEND_DIST = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
+
 if FRONTEND_DIST.exists():
     assets_dir = FRONTEND_DIST / "assets"
     if assets_dir.exists():
@@ -327,4 +487,3 @@ if FRONTEND_DIST.exists():
         if index_file.exists():
             return FileResponse(str(index_file))
         return {"message": "Frontend build not found, please run npm run build"}
-

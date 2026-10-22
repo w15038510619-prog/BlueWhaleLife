@@ -10,8 +10,8 @@ from backend.app.models.memory import KnowledgeNote, KnowledgeNoteCreate, Knowle
 class MemoryService:
     """
     SQLite Long-Term Memory System.
-    Handles viewing history, structured knowledge notes, semantic/keyword search,
-    deduplication, and memory forgetting/correction.
+    Handles viewing history, tiered comprehension evidence, structured knowledge notes,
+    semantic/keyword search, deduplication, and memory forgetting/correction.
     """
 
     @classmethod
@@ -19,12 +19,17 @@ class MemoryService:
         with get_db_connection() as conn:
             cursor = conn.cursor()
             now = item.watched_at or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            evidence_json = json.dumps(item.evidence_map or {}, ensure_ascii=False)
+
             cursor.execute("""
                 INSERT INTO watch_history (
                     bvid, title, author, cover, description, tags, watched_at,
                     choice_reason, summary, learned, viewpoint, doubts,
-                    worth_commenting, comment_draft, draft_status, user_notes
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    worth_commenting, comment_draft, draft_status, user_notes,
+                    comprehension_tier, is_partial, evidence_map, failure_reason,
+                    comment_decision_reason, publisher_type, published_at,
+                    published_comment_id, publish_error
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(bvid) DO UPDATE SET
                     watched_at = excluded.watched_at,
                     summary = excluded.summary,
@@ -33,7 +38,16 @@ class MemoryService:
                     doubts = excluded.doubts,
                     worth_commenting = excluded.worth_commenting,
                     comment_draft = excluded.comment_draft,
-                    draft_status = excluded.draft_status
+                    draft_status = excluded.draft_status,
+                    comprehension_tier = excluded.comprehension_tier,
+                    is_partial = excluded.is_partial,
+                    evidence_map = excluded.evidence_map,
+                    failure_reason = excluded.failure_reason,
+                    comment_decision_reason = excluded.comment_decision_reason,
+                    publisher_type = excluded.publisher_type,
+                    published_at = excluded.published_at,
+                    published_comment_id = excluded.published_comment_id,
+                    publish_error = excluded.publish_error
             """, (
                 item.bvid,
                 item.title,
@@ -50,8 +64,55 @@ class MemoryService:
                 1 if item.worth_commenting else 0,
                 item.comment_draft,
                 item.draft_status,
-                item.user_notes
+                item.user_notes,
+                item.comprehension_tier,
+                1 if item.is_partial else 0,
+                evidence_json,
+                item.failure_reason,
+                item.comment_decision_reason,
+                item.publisher_type,
+                item.published_at,
+                item.published_comment_id,
+                item.publish_error
             ))
+
+    @classmethod
+    def _row_to_analysis(cls, r: Any) -> VideoAnalysis:
+        tags = json.loads(r["tags"]) if r["tags"] else []
+        ev_map = {}
+        if "evidence_map" in r.keys() and r["evidence_map"]:
+            try:
+                ev_map = json.loads(r["evidence_map"])
+            except Exception:
+                pass
+
+        return VideoAnalysis(
+            bvid=r["bvid"],
+            title=r["title"],
+            author=r["author"] or "未知UP主",
+            cover=r["cover"] or "",
+            description=r["description"] or "",
+            tags=tags,
+            watched_at=r["watched_at"] or "",
+            choice_reason=r["choice_reason"] or "",
+            summary=r["summary"] or "",
+            learned=r["learned"] or "",
+            viewpoint=r["viewpoint"] or "",
+            doubts=r["doubts"] or "",
+            worth_commenting=bool(r["worth_commenting"]),
+            comment_draft=r["comment_draft"] or "",
+            draft_status=r["draft_status"] or "draft",
+            user_notes=r["user_notes"] or "",
+            comprehension_tier=r["comprehension_tier"] if "comprehension_tier" in r.keys() and r["comprehension_tier"] else "metadata_only",
+            is_partial=bool(r["is_partial"]) if "is_partial" in r.keys() else False,
+            evidence_map=ev_map,
+            failure_reason=r["failure_reason"] if "failure_reason" in r.keys() and r["failure_reason"] else "",
+            comment_decision_reason=r["comment_decision_reason"] if "comment_decision_reason" in r.keys() and r["comment_decision_reason"] else "",
+            publisher_type=r["publisher_type"] if "publisher_type" in r.keys() and r["publisher_type"] else "pending_approval",
+            published_at=r["published_at"] if "published_at" in r.keys() and r["published_at"] else "",
+            published_comment_id=r["published_comment_id"] if "published_comment_id" in r.keys() and r["published_comment_id"] else "",
+            publish_error=r["publish_error"] if "publish_error" in r.keys() and r["publish_error"] else ""
+        )
 
     @classmethod
     def get_watch_history(cls, limit: int = 50, offset: int = 0) -> List[VideoAnalysis]:
@@ -62,28 +123,7 @@ class MemoryService:
                 ORDER BY id DESC LIMIT ? OFFSET ?
             """, (limit, offset))
             rows = cursor.fetchall()
-            result = []
-            for r in rows:
-                tags = json.loads(r["tags"]) if r["tags"] else []
-                result.append(VideoAnalysis(
-                    bvid=r["bvid"],
-                    title=r["title"],
-                    author=r["author"] or "未知UP主",
-                    cover=r["cover"] or "",
-                    description=r["description"] or "",
-                    tags=tags,
-                    watched_at=r["watched_at"] or "",
-                    choice_reason=r["choice_reason"] or "",
-                    summary=r["summary"] or "",
-                    learned=r["learned"] or "",
-                    viewpoint=r["viewpoint"] or "",
-                    doubts=r["doubts"] or "",
-                    worth_commenting=bool(r["worth_commenting"]),
-                    comment_draft=r["comment_draft"] or "",
-                    draft_status=r["draft_status"] or "draft",
-                    user_notes=r["user_notes"] or ""
-                ))
-            return result
+            return [cls._row_to_analysis(r) for r in rows]
 
     @classmethod
     def get_watch_by_bvid(cls, bvid: str) -> Optional[VideoAnalysis]:
@@ -93,25 +133,7 @@ class MemoryService:
             r = cursor.fetchone()
             if not r:
                 return None
-            tags = json.loads(r["tags"]) if r["tags"] else []
-            return VideoAnalysis(
-                bvid=r["bvid"],
-                title=r["title"],
-                author=r["author"] or "未知UP主",
-                cover=r["cover"] or "",
-                description=r["description"] or "",
-                tags=tags,
-                watched_at=r["watched_at"] or "",
-                choice_reason=r["choice_reason"] or "",
-                summary=r["summary"] or "",
-                learned=r["learned"] or "",
-                viewpoint=r["viewpoint"] or "",
-                doubts=r["doubts"] or "",
-                worth_commenting=bool(r["worth_commenting"]),
-                comment_draft=r["comment_draft"] or "",
-                draft_status=r["draft_status"] or "draft",
-                user_notes=r["user_notes"] or ""
-            )
+            return cls._row_to_analysis(r)
 
     @classmethod
     def update_draft(cls, bvid: str, req: UpdateDraftRequest) -> Optional[VideoAnalysis]:
@@ -123,12 +145,13 @@ class MemoryService:
             new_status = req.draft_status if req.draft_status is not None else current.draft_status
             new_draft = req.comment_draft if req.comment_draft is not None else current.comment_draft
             new_notes = req.user_notes if req.user_notes is not None else current.user_notes
+            new_pub = req.publisher_type if req.publisher_type is not None else current.publisher_type
 
             cursor.execute("""
                 UPDATE watch_history
-                SET draft_status = ?, comment_draft = ?, user_notes = ?
+                SET draft_status = ?, comment_draft = ?, user_notes = ?, publisher_type = ?
                 WHERE bvid = ?
-            """, (new_status, new_draft, new_notes, bvid))
+            """, (new_status, new_draft, new_notes, new_pub, bvid))
 
         return cls.get_watch_by_bvid(bvid)
 
@@ -216,9 +239,6 @@ class MemoryService:
 
     @classmethod
     def forget_knowledge_note(cls, note_id: int) -> bool:
-        """
-        Soft deletes (forgets) a note, preserving historical integrity while removing it from active memory.
-        """
         with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("UPDATE knowledge_notes SET is_active = 0 WHERE id = ?", (note_id,))
@@ -226,47 +246,42 @@ class MemoryService:
 
     @classmethod
     def deduplicate_notes(cls) -> int:
-        """
-        Identifies duplicate notes by identical topic or near-identical content and archives the older duplicates.
-        """
         merged_count = 0
         with get_db_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
-                SELECT id, topic, content FROM knowledge_notes
-                WHERE is_active = 1
-                ORDER BY id ASC
-            """)
-            rows = cursor.fetchall()
-            seen_topics = {}
-            for r in rows:
-                t = r["topic"].strip().lower()
-                if t in seen_topics:
-                    # Mark older or duplicate one inactive
-                    cursor.execute("UPDATE knowledge_notes SET is_active = 0 WHERE id = ?", (r["id"],))
+            cursor.execute("SELECT * FROM knowledge_notes WHERE is_active = 1 ORDER BY id ASC")
+            notes = cursor.fetchall()
+            seen_topics: Dict[str, int] = {}
+            for n in notes:
+                topic = n["topic"].strip()
+                if topic in seen_topics:
+                    cursor.execute("UPDATE knowledge_notes SET is_active = 0 WHERE id = ?", (n["id"],))
                     merged_count += 1
                 else:
-                    seen_topics[t] = r["id"]
-
+                    seen_topics[topic] = n["id"]
         return merged_count
 
     @classmethod
     def search_memories(cls, query: str, limit: int = 10) -> MemorySearchResult:
-        clean_q = query.strip()
-        if not clean_q:
-            return MemorySearchResult(query=query)
-
-        search_term = f"%{clean_q}%"
+        q = f"%{query.strip()}%"
         with get_db_connection() as conn:
             cursor = conn.cursor()
-            # 1. Search knowledge notes
+            cursor.execute("""
+                SELECT * FROM watch_history
+                WHERE title LIKE ? OR summary LIKE ? OR learned LIKE ? OR viewpoint LIKE ?
+                ORDER BY id DESC LIMIT ?
+            """, (q, q, q, q, limit))
+            video_rows = cursor.fetchall()
+
             cursor.execute("""
                 SELECT * FROM knowledge_notes
                 WHERE is_active = 1 AND (topic LIKE ? OR content LIKE ?)
                 ORDER BY importance DESC, id DESC LIMIT ?
-            """, (search_term, search_term, limit))
-            n_rows = cursor.fetchall()
-            notes = [
+            """, (q, q, limit))
+            note_rows = cursor.fetchall()
+
+            matched_videos = [cls._row_to_analysis(r) for r in video_rows]
+            matched_notes = [
                 KnowledgeNote(
                     id=r["id"],
                     topic=r["topic"],
@@ -276,37 +291,64 @@ class MemoryService:
                     importance=r["importance"],
                     is_active=bool(r["is_active"])
                 )
-                for r in n_rows
+                for r in note_rows
             ]
 
-            # 2. Search watch history
-            cursor.execute("""
-                SELECT bvid, title, author, watched_at, summary, learned, viewpoint
-                FROM watch_history
-                WHERE title LIKE ? OR learned LIKE ? OR summary LIKE ? OR viewpoint LIKE ?
-                ORDER BY id DESC LIMIT ?
-            """, (search_term, search_term, search_term, search_term, limit))
-            w_rows = cursor.fetchall()
-            watches = [dict(r) for r in w_rows]
-
-        return MemorySearchResult(query=query, notes=notes, watches=watches)
+            return MemorySearchResult(
+                videos=matched_videos,
+                notes=matched_notes,
+                query=query
+            )
 
     @classmethod
-    def get_related_memories(cls, tags: List[str], title: str) -> List[dict]:
-        """
-        Retrieves related past watches or knowledge notes to let the AI quote/reference previous experiences.
-        """
-        keywords = tags + [word for word in title.split() if len(word) >= 2]
-        related = []
+    def get_related_memories(cls, tags: List[str], title: str, limit: int = 3) -> List[Dict[str, Any]]:
         with get_db_connection() as conn:
             cursor = conn.cursor()
-            for kw in keywords[:4]:
-                cursor.execute("""
-                    SELECT bvid, title, viewpoint, learned FROM watch_history
-                    WHERE title LIKE ? OR tags LIKE ?
-                    LIMIT 2
-                """, (f"%{kw}%", f"%{kw}%"))
-                for r in cursor.fetchall():
-                    if r["title"] != title and not any(x["bvid"] == r["bvid"] for x in related):
-                        related.append(dict(r))
-        return related[:3]
+            cursor.execute("SELECT * FROM watch_history ORDER BY id DESC LIMIT 40")
+            rows = cursor.fetchall()
+            related = []
+            for r in rows:
+                r_tags = json.loads(r["tags"]) if r["tags"] else []
+                overlap = set(tags).intersection(set(r_tags))
+                if overlap or any(word in r["title"] for word in title.split() if len(word) > 2):
+                    related.append({
+                        "bvid": r["bvid"],
+                        "title": r["title"],
+                        "viewpoint": r["viewpoint"],
+                        "learned": r["learned"]
+                    })
+                    if len(related) >= limit:
+                        break
+            return related
+
+    # Chat history persistence
+    @classmethod
+    def record_chat_message(cls, role: str, content: str, pet_state: str = "idle", mood: str = "") -> None:
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO chat_messages (role, content, pet_state, mood, created_at)
+                VALUES (?, ?, ?, ?, ?)
+            """, (role, content, pet_state, mood, now_str))
+
+    @classmethod
+    def get_recent_chat_history(cls, limit: int = 30) -> List[Dict[str, Any]]:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM chat_messages
+                ORDER BY id ASC LIMIT ?
+            """, (limit,))
+            rows = cursor.fetchall()
+            return [
+                {
+                    "id": r["id"],
+                    "role": r["role"],
+                    "content": r["content"],
+                    "pet_state": r["pet_state"],
+                    "mood": r["mood"],
+                    "created_at": r["created_at"]
+                }
+                for r in rows
+            ]

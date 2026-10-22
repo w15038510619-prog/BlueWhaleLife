@@ -1,21 +1,43 @@
 from __future__ import annotations
 import json
+import os
+import shutil
 import sqlite3
 from datetime import datetime
 from pathlib import Path
 from contextlib import contextmanager
 from typing import Generator
-from backend.app.config import DB_FILE, DATA_DIR
+from backend.app.config import DEFAULT_DB_FILE, DATA_DIR
 
 
 def get_db_path() -> Path:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    return DB_FILE
+    # Complete isolation for tests if environment variable set
+    custom_path = os.getenv("WHALE_LIFE_DB_PATH")
+    if custom_path:
+        return Path(custom_path)
+    if os.getenv("TESTING") == "1" or os.getenv("WHALE_LIFE_TEST_MODE") == "1":
+        return DATA_DIR / "whale_life_test.db"
+    return DEFAULT_DB_FILE
+
+
+def backup_production_db():
+    """Create a safety backup of existing production database before applying schema migrations."""
+    db_path = get_db_path()
+    if db_path.exists() and db_path.name == "whale_life.db":
+        try:
+            today_str = datetime.now().strftime("%Y%m%d")
+            backup_file = DATA_DIR / f"whale_life_backup_{today_str}.db"
+            if not backup_file.exists():
+                shutil.copy2(db_path, backup_file)
+                print(f"[Database] Production safety backup created: {backup_file}")
+        except Exception as e:
+            print(f"[Database] Backup notice: {e}")
 
 
 @contextmanager
 def get_db_connection() -> Generator[sqlite3.Connection, None, None]:
-    conn = sqlite3.connect(str(get_db_path()), timeout=10.0)
+    conn = sqlite3.connect(str(get_db_path()), timeout=15.0)
     conn.row_factory = sqlite3.Row
     try:
         yield conn
@@ -27,12 +49,29 @@ def get_db_connection() -> Generator[sqlite3.Connection, None, None]:
         conn.close()
 
 
+def _ensure_columns_exist(conn: sqlite3.Connection, table_name: str, required_cols: dict[str, str]):
+    """Idempotently add new columns to an existing SQLite table without altering or wiping data."""
+    cursor = conn.cursor()
+    cursor.execute(f"PRAGMA table_info({table_name})")
+    existing_cols = {row["name"] for row in cursor.fetchall()}
+
+    for col_name, col_def in required_cols.items():
+        if col_name not in existing_cols:
+            try:
+                cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_def}")
+                print(f"[Database] Migrated table '{table_name}': added column '{col_name}'")
+            except Exception as e:
+                print(f"[Database] Column migration notice for {table_name}.{col_name}: {e}")
+
+
 def init_db() -> None:
-    get_db_path()
+    # 1. Safety backup if production DB exists
+    backup_production_db()
+
     with get_db_connection() as conn:
         cursor = conn.cursor()
-        
-        # 1. 观影记录表
+
+        # 1. 观影记录表 (Watch History)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS watch_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -54,8 +93,21 @@ def init_db() -> None:
                 user_notes TEXT DEFAULT ''
             )
         """)
-        
-        # 2. 知识笔记表 (带遗忘和纠错)
+
+        # Phase 2 columns for watch_history
+        _ensure_columns_exist(conn, "watch_history", {
+            "comprehension_tier": "TEXT DEFAULT 'metadata_only'",
+            "is_partial": "INTEGER DEFAULT 0",
+            "evidence_map": "TEXT DEFAULT '{}'",
+            "failure_reason": "TEXT DEFAULT ''",
+            "comment_decision_reason": "TEXT DEFAULT ''",
+            "publisher_type": "TEXT DEFAULT 'pending_approval'",
+            "published_at": "TEXT DEFAULT ''",
+            "published_comment_id": "TEXT DEFAULT ''",
+            "publish_error": "TEXT DEFAULT ''"
+        })
+
+        # 2. 知识笔记表 (Knowledge Notes)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS knowledge_notes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -67,8 +119,12 @@ def init_db() -> None:
                 is_active INTEGER DEFAULT 1
             )
         """)
-        
-        # 3. 日常反思与成长日志表
+        _ensure_columns_exist(conn, "knowledge_notes", {
+            "evidence_anchor": "TEXT DEFAULT ''",
+            "verified": "INTEGER DEFAULT 1"
+        })
+
+        # 3. 日常反思与成长日志表 (Reflection Logs)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS reflection_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -82,8 +138,8 @@ def init_db() -> None:
                 created_at TEXT
             )
         """)
-        
-        # 4. 人格与兴趣版本表 (支持回滚与理由追溯)
+
+        # 4. 人格与兴趣版本表 (Personality States)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS personality_states (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -95,8 +151,8 @@ def init_db() -> None:
                 is_current INTEGER DEFAULT 1
             )
         """)
-        
-        # 5. 发现候选池
+
+        # 5. 发现候选池 (Discovery Candidates)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS discovery_candidates (
                 bvid TEXT PRIMARY KEY,
@@ -114,7 +170,55 @@ def init_db() -> None:
             )
         """)
 
-        # 检查是否已有人格初始版本，若无则初始化版本 1
+        # 6. 自主评论发布审计与追踪表 (Comment Publications)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS comment_publications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                bvid TEXT NOT NULL,
+                comment_content TEXT NOT NULL,
+                publisher_type TEXT NOT NULL,
+                status TEXT NOT NULL,
+                platform_comment_id TEXT DEFAULT '',
+                created_at TEXT NOT NULL,
+                published_at TEXT DEFAULT '',
+                ai_disclaimer_included INTEGER DEFAULT 1,
+                audit_passed INTEGER DEFAULT 1,
+                audit_details TEXT DEFAULT '',
+                error_message TEXT DEFAULT ''
+            )
+        """)
+
+        # 7. 聊天记录持久化表 (Chat Messages)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS chat_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                pet_state TEXT DEFAULT 'idle',
+                mood TEXT DEFAULT '',
+                created_at TEXT NOT NULL
+            )
+        """)
+
+        # 8. 自主调度器状态持久化表 (Scheduler State)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS scheduler_state (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                enabled INTEGER DEFAULT 1,
+                last_run_at TEXT DEFAULT '',
+                today_date TEXT DEFAULT '',
+                today_explores_count INTEGER DEFAULT 0,
+                status TEXT DEFAULT 'idle',
+                current_activity TEXT DEFAULT '待机探索就绪'
+            )
+        """)
+        cursor.execute("""
+            INSERT INTO scheduler_state (id, enabled, last_run_at, today_date, today_explores_count, status, current_activity)
+            VALUES (1, 1, '', '', 0, 'idle', '待机探索就绪')
+            ON CONFLICT(id) DO NOTHING
+        """)
+
+        # Initialize version 1 personality if table is empty
         cursor.execute("SELECT COUNT(*) FROM personality_states")
         if cursor.fetchone()[0] == 0:
             initial_traits = {
@@ -142,8 +246,8 @@ def init_db() -> None:
                 json.dumps(initial_traits, ensure_ascii=False),
                 json.dumps(initial_interests, ensure_ascii=False)
             ))
-            
-        # 检查是否已有初始知识笔记
+
+        # Initialize knowledge notes if table is empty
         cursor.execute("SELECT COUNT(*) FROM knowledge_notes")
         if cursor.fetchone()[0] == 0:
             cursor.execute("""
@@ -166,5 +270,5 @@ def init_db() -> None:
                 datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 4
             ))
-            
-        print("[Database] SQLite initialized successfully.")
+
+        print("[Database] SQLite initialized and migrated successfully.")

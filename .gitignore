@@ -53,6 +53,9 @@ Thumbs.db
 Desktop.ini
 $RECYCLE.BIN/
 
+# Test renders
+desktop_pet/assets/test_renders/
+
 # IDE
 .vscode/
 .idea/

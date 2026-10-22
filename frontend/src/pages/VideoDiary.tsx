@@ -1,7 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import { VideoAnalysis } from '../types';
 import { api } from '../api/client';
-import { BookOpen, ExternalLink, Copy, Check, MessageSquare, HelpCircle, Lightbulb, Clock, User, Edit3 } from 'lucide-react';
+import {
+  BookOpen,
+  ExternalLink,
+  Copy,
+  Check,
+  MessageSquare,
+  HelpCircle,
+  Lightbulb,
+  Clock,
+  User,
+  Edit3,
+  Send,
+  ShieldCheck,
+  AlertTriangle,
+  FileText,
+  Layers
+} from 'lucide-react';
 
 interface VideoDiaryProps {
   initialBvid?: string;
@@ -13,10 +29,13 @@ export const VideoDiary: React.FC<VideoDiaryProps> = ({ initialBvid }) => {
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
   const [editingDraft, setEditingDraft] = useState('');
-  const [editingStatus, setEditingStatus] = useState<any>('draft');
+  const [editingStatus, setEditingStatus] = useState<string>('draft');
   const [editingNotes, setEditingNotes] = useState('');
+  const [editingPublisher, setEditingPublisher] = useState<string>('pending_approval');
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [publishing, setPublishing] = useState(false);
+  const [publishMessage, setPublishMessage] = useState<{ type: 'success' | 'warn' | 'error'; text: string } | null>(null);
 
   useEffect(() => {
     loadVideos();
@@ -47,8 +66,10 @@ export const VideoDiary: React.FC<VideoDiaryProps> = ({ initialBvid }) => {
     setEditingDraft(v.comment_draft);
     setEditingStatus(v.draft_status);
     setEditingNotes(v.user_notes || '');
+    setEditingPublisher(v.publisher_type || 'pending_approval');
     setCopied(false);
     setSaveSuccess(false);
+    setPublishMessage(null);
   };
 
   const handleCopyDraft = () => {
@@ -57,7 +78,6 @@ export const VideoDiary: React.FC<VideoDiaryProps> = ({ initialBvid }) => {
     setCopied(true);
     setTimeout(() => setCopied(false), 2500);
 
-    // Update status to 'copied' automatically if still in draft
     if (editingStatus === 'draft') {
       setEditingStatus('copied');
       handleSave('copied');
@@ -73,7 +93,8 @@ export const VideoDiary: React.FC<VideoDiaryProps> = ({ initialBvid }) => {
         selectedVideo.bvid,
         statusToSave,
         editingDraft,
-        editingNotes
+        editingNotes,
+        editingPublisher
       );
       setSelectedVideo(updated);
       setVideos(prev => prev.map(v => v.bvid === updated.bvid ? updated : v));
@@ -86,13 +107,51 @@ export const VideoDiary: React.FC<VideoDiaryProps> = ({ initialBvid }) => {
     }
   };
 
+  const handlePublish = async () => {
+    if (!selectedVideo) return;
+    setPublishing(true);
+    setPublishMessage(null);
+    try {
+      const res = await api.publishComment(selectedVideo.bvid);
+      if (res.status === 'published') {
+        setPublishMessage({
+          type: 'success',
+          text: `发布成功！平台评论编号: ${res.platform_comment_id || '已确认'}`
+        });
+      } else if (res.status === 'needs_scope') {
+        setPublishMessage({
+          type: 'warn',
+          text: `缺少官方开放平台写权限 (${res.missing_scope || 'scope'})，已安全转入待审队列。可点击“一键复制草稿”在B站手动发表。`
+        });
+      } else {
+        setPublishMessage({
+          type: 'error',
+          text: res.reason || '发布未成功，已归档'
+        });
+      }
+      // Refresh video details
+      const refreshed = await api.getVideo(selectedVideo.bvid);
+      if (refreshed) {
+        setSelectedVideo(refreshed);
+        setVideos(prev => prev.map(v => v.bvid === refreshed.bvid ? refreshed : v));
+      }
+    } catch (e: any) {
+      setPublishMessage({
+        type: 'error',
+        text: `发布请求异常: ${e.message || e}`
+      });
+    } finally {
+      setPublishing(false);
+    }
+  };
+
   return (
     <div>
       <div className="page-header">
         <div>
-          <h2 className="page-title">观影日记 📖</h2>
+          <h2 className="page-title">观影日记与深度交流 📖</h2>
           <p className="page-desc">
-            记录大肥鱼看过的每个视频：学到了什么、独立观点、存疑与评论草稿（由主人审核确认，手动发布）
+            记录大肥鱼看过的每个视频：分级理解度、证据锚点、独立观点、自主评论决策与发布通道。
           </p>
         </div>
       </div>
@@ -127,9 +186,11 @@ export const VideoDiary: React.FC<VideoDiaryProps> = ({ initialBvid }) => {
                     <div style={{ fontSize: '13px', fontWeight: isSelected ? '700' : '500', color: isSelected ? '#1e40af' : '#1e293b', marginBottom: '4px', lineHeight: '1.4' }}>
                       {v.title}
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-muted)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
                       <span>{v.author}</span>
-                      <span>{v.watched_at ? v.watched_at.split(' ')[0] : ''}</span>
+                      <span className={`badge ${v.comprehension_tier === 'subtitles' ? 'badge-green' : 'badge-amber'}`} style={{ fontSize: '10px', padding: '1px 6px' }}>
+                        {v.comprehension_tier === 'subtitles' ? '字幕全片' : '简介部分'}
+                      </span>
                     </div>
                   </div>
                 );
@@ -145,6 +206,17 @@ export const VideoDiary: React.FC<VideoDiaryProps> = ({ initialBvid }) => {
             <div className="card">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '16px' }}>
                 <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                    <span className={`badge ${selectedVideo.comprehension_tier === 'subtitles' ? 'badge-green' : 'badge-amber'}`}>
+                      {selectedVideo.comprehension_tier === 'subtitles' ? '📜 全片字幕深度研读' : '🔍 公开简介部分理解'}
+                    </span>
+                    {selectedVideo.is_partial && (
+                      <span className="badge badge-amber" style={{ fontSize: '11px' }}>
+                        真实声明：未获取完整音视频画面
+                      </span>
+                    )}
+                  </div>
+
                   <h3 style={{ fontSize: '20px', fontWeight: 'bold', color: '#0f172a', marginBottom: '8px' }}>
                     {selectedVideo.title}
                   </h3>
@@ -153,7 +225,7 @@ export const VideoDiary: React.FC<VideoDiaryProps> = ({ initialBvid }) => {
                       <User size={14} /> UP主：{selectedVideo.author}
                     </span>
                     <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      <Clock size={14} /> 观看时间：{selectedVideo.watched_at}
+                      <Clock size={14} /> 记录时间：{selectedVideo.watched_at}
                     </span>
                     <span>BV号：{selectedVideo.bvid}</span>
                   </div>
@@ -220,7 +292,7 @@ export const VideoDiary: React.FC<VideoDiaryProps> = ({ initialBvid }) => {
               {/* Doubts */}
               <div className="card" style={{ margin: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', color: '#d97706', fontWeight: 'bold', fontSize: '15px' }}>
-                  <HelpCircle size={18} /> 存疑与延伸思考
+                  <HelpCircle size={18} /> 存疑与考证
                 </div>
                 <p style={{ fontSize: '14px', color: '#334155', lineHeight: '1.6' }}>
                   {selectedVideo.doubts}
@@ -228,14 +300,32 @@ export const VideoDiary: React.FC<VideoDiaryProps> = ({ initialBvid }) => {
               </div>
             </div>
 
-            {/* Comment Draft Section (Safe Human-in-the-loop manual review) */}
+            {/* Evidence Anchors Box (when available) */}
+            {selectedVideo.evidence_map && Object.keys(selectedVideo.evidence_map).length > 0 && (
+              <div className="card" style={{ background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', fontSize: '14px', fontWeight: 'bold', color: '#334155' }}>
+                  <Layers size={16} /> 论据与信息来源锚点（真实可追溯）
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                  {Object.entries(selectedVideo.evidence_map).map(([k, v]) => (
+                    Array.isArray(v) && v.map((item, idx) => (
+                      <span key={`${k}-${idx}`} style={{ fontSize: '12px', background: '#ffffff', border: '1px solid #cbd5e1', padding: '3px 8px', borderRadius: '4px', color: '#475569' }}>
+                        📌 {item}
+                      </span>
+                    ))
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Autonomous Comment Decision & Publisher Section */}
             <div className="card">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <Edit3 size={18} color="#2563eb" />
-                  <h4 style={{ fontSize: '16px', fontWeight: 'bold' }}>评论交流草稿</h4>
+                  <h4 style={{ fontSize: '16px', fontWeight: 'bold' }}>评论交流与自主发布通道</h4>
                   <span className={`badge ${selectedVideo.worth_commenting ? 'badge-green' : 'badge-amber'}`}>
-                    {selectedVideo.worth_commenting ? '推荐参与交流' : '暂不建议评论'}
+                    {selectedVideo.worth_commenting ? '决策：值得交流' : '决策：不参与评论'}
                   </span>
                 </div>
 
@@ -246,22 +336,62 @@ export const VideoDiary: React.FC<VideoDiaryProps> = ({ initialBvid }) => {
                     value={editingStatus}
                     onChange={e => setEditingStatus(e.target.value)}
                   >
-                    <option value="draft">草稿待审</option>
-                    <option value="approved">主人已批准</option>
-                    <option value="copied">已复制草稿</option>
-                    <option value="rejected">放弃交流</option>
+                    <option value="draft">草稿</option>
+                    <option value="pending_approval">待主人批准</option>
+                    <option value="approved">已批准</option>
+                    <option value="published">已发布</option>
+                    <option value="declined">放弃交流</option>
                   </select>
 
-                  <button className="btn btn-primary" onClick={handleCopyDraft}>
+                  <button className="btn btn-secondary" onClick={handleCopyDraft} title="复制草稿到剪贴板">
                     {copied ? <Check size={16} /> : <Copy size={16} />}
-                    {copied ? '已复制到剪贴板！' : '一键复制草稿'}
+                    {copied ? '已复制！' : '复制草稿'}
+                  </button>
+
+                  <button
+                    className="btn btn-primary"
+                    onClick={handlePublish}
+                    disabled={publishing || !editingDraft}
+                  >
+                    <Send size={16} />
+                    {publishing ? '发布中...' : '提交发布'}
                   </button>
                 </div>
               </div>
 
-              <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '8px' }}>
-                【安全机制】：大肥鱼绝不会未经确认自动发布评论。请在此审核/微调，复制后到B站页面由您手动发送。
-              </div>
+              {/* Autonomous Decision Explanation */}
+              {selectedVideo.comment_decision_reason && (
+                <div style={{
+                  background: '#f0fdf4',
+                  border: '1px solid #bbf7d0',
+                  borderRadius: '6px',
+                  padding: '8px 12px',
+                  fontSize: '13px',
+                  color: '#166534',
+                  marginBottom: '12px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}>
+                  <ShieldCheck size={16} />
+                  <span><b>大肥鱼决策理由：</b> {selectedVideo.comment_decision_reason}</span>
+                </div>
+              )}
+
+              {/* Publish Result Banner */}
+              {publishMessage && (
+                <div style={{
+                  marginBottom: '12px',
+                  padding: '10px 14px',
+                  borderRadius: '6px',
+                  fontSize: '13px',
+                  background: publishMessage.type === 'success' ? '#dcfce7' : publishMessage.type === 'warn' ? '#fef3c7' : '#fee2e2',
+                  color: publishMessage.type === 'success' ? '#15803d' : publishMessage.type === 'warn' ? '#b45309' : '#b91c1c',
+                  border: `1px solid ${publishMessage.type === 'success' ? '#86efac' : publishMessage.type === 'warn' ? '#fcd34d' : '#fca5a5'}`
+                }}>
+                  {publishMessage.text}
+                </div>
+              )}
 
               <textarea
                 className="textarea"
@@ -271,17 +401,36 @@ export const VideoDiary: React.FC<VideoDiaryProps> = ({ initialBvid }) => {
                 placeholder="评论草稿内容..."
               />
 
-              <div>
-                <label style={{ fontSize: '13px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '4px' }}>
-                  主人批注与备忘：
-                </label>
-                <input
-                  type="text"
-                  className="input"
-                  placeholder="记录您对该评论或视频的个人想法..."
-                  value={editingNotes}
-                  onChange={e => setEditingNotes(e.target.value)}
-                />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                <div>
+                  <label style={{ fontSize: '13px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '4px' }}>
+                    发布通道设定：
+                  </label>
+                  <select
+                    className="select"
+                    value={editingPublisher}
+                    onChange={e => setEditingPublisher(e.target.value)}
+                    style={{ width: '100%' }}
+                  >
+                    <option value="pending_approval">主人确认队列 (优雅降级/安全待审)</option>
+                    <option value="official_api">B站官方开放平台 API (需要 OAuth2 写权限)</option>
+                    <option value="webhook">外部 Webhook 通道 (推送通知与自动化脚本)</option>
+                    <option value="local_audit">本地合规审计模式 (仅落库不外发)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '13px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '4px' }}>
+                    主人批注与备忘：
+                  </label>
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder="记录您对该评论或视频的个人想法..."
+                    value={editingNotes}
+                    onChange={e => setEditingNotes(e.target.value)}
+                  />
+                </div>
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '14px' }}>
@@ -291,7 +440,7 @@ export const VideoDiary: React.FC<VideoDiaryProps> = ({ initialBvid }) => {
                   </span>
                 )}
                 <button className="btn btn-secondary" onClick={() => handleSave()} disabled={saving}>
-                  {saving ? '保存中...' : '保存草稿与批注'}
+                  {saving ? '保存中...' : '保存修改与通道'}
                 </button>
               </div>
             </div>

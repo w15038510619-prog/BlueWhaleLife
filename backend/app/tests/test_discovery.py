@@ -1,3 +1,4 @@
+import asyncio
 import pytest
 from backend.app.database import init_db
 from backend.app.services.discovery import DiscoveryEngine
@@ -9,7 +10,7 @@ def setup_db():
 
 
 def test_autonomous_exploration():
-    candidates = DiscoveryEngine.explore()
+    candidates = asyncio.run(DiscoveryEngine.explore())
     assert len(candidates) > 0
 
     first = candidates[0]

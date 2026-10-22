@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { SettingsResponse } from '../types';
 import { api } from '../api/client';
-import { Settings as SettingsIcon, Key, ShieldCheck, Save, Eye, EyeOff, CheckCircle2 } from 'lucide-react';
+import { Settings as SettingsIcon, Key, ShieldCheck, Save, Eye, EyeOff, CheckCircle2, ShieldAlert, Radio, Clock, Zap } from 'lucide-react';
 
 export const Settings: React.FC = () => {
   const [settings, setSettings] = useState<SettingsResponse | null>(null);
+
+  // LLM Settings
   const [baseUrl, setBaseUrl] = useState('');
   const [model, setModel] = useState('');
   const [apiKey, setApiKey] = useState('');
@@ -13,6 +15,22 @@ export const Settings: React.FC = () => {
   const [characterName, setCharacterName] = useState('大肥鱼');
   const [curiosity, setCuriosity] = useState(0.85);
   const [novelty, setNovelty] = useState(0.35);
+
+  // Publisher & Autonomous Comment Settings
+  const [publisherType, setPublisherType] = useState('pending_approval');
+  const [bilibiliToken, setBilibiliToken] = useState('');
+  const [showBiliToken, setShowBiliToken] = useState(false);
+  const [webhookUrl, setWebhookUrl] = useState('');
+  const [emergencyStop, setEmergencyStop] = useState(false);
+  const [maxCommentsPerDay, setMaxCommentsPerDay] = useState(3);
+  const [autoCommentEnabled, setAutoCommentEnabled] = useState(false);
+
+  // Scheduler Settings
+  const [schedulerEnabled, setSchedulerEnabled] = useState(true);
+  const [intervalMinutes, setIntervalMinutes] = useState(30);
+  const [quietHoursStart, setQuietHoursStart] = useState(23);
+  const [quietHoursEnd, setQuietHoursEnd] = useState(7);
+  const [dailyExploreBudget, setDailyExploreBudget] = useState(5);
 
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -31,6 +49,18 @@ export const Settings: React.FC = () => {
       setCharacterName(s.character_name);
       setCuriosity(s.curiosity_level);
       setNovelty(s.novelty_weight);
+
+      setPublisherType(s.publisher_type || 'pending_approval');
+      setWebhookUrl(s.webhook_url || '');
+      setEmergencyStop(s.emergency_stop || false);
+      setMaxCommentsPerDay(s.max_comments_per_day || 3);
+      setAutoCommentEnabled(s.auto_comment_enabled || false);
+
+      setSchedulerEnabled(s.scheduler_enabled !== undefined ? s.scheduler_enabled : true);
+      setIntervalMinutes(s.scheduler_interval_minutes || 30);
+      setQuietHoursStart(s.quiet_hours_start !== undefined ? s.quiet_hours_start : 23);
+      setQuietHoursEnd(s.quiet_hours_end !== undefined ? s.quiet_hours_end : 7);
+      setDailyExploreBudget(s.daily_explore_budget || 5);
     } catch (e) {
       console.error(e);
     }
@@ -46,15 +76,33 @@ export const Settings: React.FC = () => {
         demo_mode: demoMode,
         character_name: characterName.trim(),
         curiosity_level: curiosity,
-        novelty_weight: novelty
+        novelty_weight: novelty,
+
+        publisher_type: publisherType,
+        webhook_url: webhookUrl.trim(),
+        emergency_stop: emergencyStop,
+        max_comments_per_day: maxCommentsPerDay,
+        auto_comment_enabled: autoCommentEnabled,
+
+        scheduler_enabled: schedulerEnabled,
+        scheduler_interval_minutes: intervalMinutes,
+        quiet_hours_start: quietHoursStart,
+        quiet_hours_end: quietHoursEnd,
+        daily_explore_budget: dailyExploreBudget
       };
+
       if (apiKey.trim()) {
         updateData.llm_api_key = apiKey.trim();
       }
+      if (bilibiliToken.trim()) {
+        updateData.bilibili_access_token = bilibiliToken.trim();
+      }
+
       const updated = await api.updateSettings(updateData);
       setSettings(updated);
-      setApiKey(''); // clear plain input after saving
-      setToast('设置已成功保存！密钥安全存储在本地。');
+      setApiKey('');
+      setBilibiliToken('');
+      setToast('设置已成功保存！密钥与令牌已安全加密存储。');
       setTimeout(() => setToast(null), 3500);
     } catch (e) {
       console.error(e);
@@ -68,9 +116,9 @@ export const Settings: React.FC = () => {
     <div>
       <div className="page-header">
         <div>
-          <h2 className="page-title">系统与模型设置 ⚙️</h2>
+          <h2 className="page-title">系统与安全配置 ⚙️</h2>
           <p className="page-desc">
-            配置兼容 OpenAI 格式的大语言模型服务（如 DeepSeek 等），设定小肥鱼的探索倾向
+            配置大模型地址、自主评论发布通道、安全紧急开关及自主生活作息调度。
           </p>
         </div>
       </div>
@@ -88,136 +136,305 @@ export const Settings: React.FC = () => {
           gap: '8px'
         }}>
           <CheckCircle2 size={18} color="#059669" />
-          {toast}
+          <span>{toast}</span>
         </div>
       )}
 
-      <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-        {/* LLM Config Card */}
-        <div className="card">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', color: '#2563eb' }}>
-            <Key size={20} />
-            <h3 style={{ fontSize: '17px', fontWeight: 'bold' }}>大模型 API 配置 (兼容 OpenAI 格式)</h3>
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-            <div>
-              <label style={{ fontSize: '13px', fontWeight: '600', display: 'block', marginBottom: '4px' }}>
-                API Base URL
-              </label>
-              <input
-                type="text"
-                className="input"
-                placeholder="例如：https://api.deepseek.com/v1 或 https://api.openai.com/v1"
-                value={baseUrl}
-                onChange={e => setBaseUrl(e.target.value)}
-                required
-              />
-              <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                DeepSeek 官方兼容地址为 https://api.deepseek.com/v1
-              </span>
-            </div>
-
-            <div>
-              <label style={{ fontSize: '13px', fontWeight: '600', display: 'block', marginBottom: '4px' }}>
-                模型名称 (Model)
-              </label>
-              <input
-                type="text"
-                className="input"
-                placeholder="例如：deepseek-chat 或 gpt-4o-mini"
-                value={model}
-                onChange={e => setModel(e.target.value)}
-                required
-              />
-            </div>
-
-            <div>
-              <label style={{ fontSize: '13px', fontWeight: '600', display: 'block', marginBottom: '4px' }}>
-                API Key
-              </label>
-              <div style={{ position: 'relative' }}>
-                <input
-                  type={showKey ? 'text' : 'password'}
-                  className="input"
-                  placeholder={settings?.has_api_key ? `已配置 (${settings.llm_api_key_masked})，输入新密钥覆盖` : '输入您的 API Key（如 sk-...）'}
-                  value={apiKey}
-                  onChange={e => setApiKey(e.target.value)}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowKey(!showKey)}
-                  style={{
-                    position: 'absolute',
-                    right: '12px',
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                    background: 'none',
-                    border: 'none',
-                    cursor: 'pointer',
-                    color: 'var(--text-muted)'
-                  }}
-                >
-                  {showKey ? <EyeOff size={16} /> : <Eye size={16} />}
-                </button>
-              </div>
-            </div>
-
-            {/* Demo Mode Toggle */}
-            <div style={{
-              background: '#f8fafc',
-              border: '1px solid var(--border)',
-              borderRadius: '8px',
-              padding: '12px 16px',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center'
-            }}>
+      <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+        {/* Section 1: Emergency Stop Switch */}
+        <div className="card" style={{ background: emergencyStop ? '#fef2f2' : '#ffffff', border: `1px solid ${emergencyStop ? '#fca5a5' : '#e2e8f0'}` }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <ShieldAlert size={24} color={emergencyStop ? '#dc2626' : '#64748b'} />
               <div>
-                <b style={{ fontSize: '14px', color: '#1e293b' }}>离线演示模式 (Demo Mode)</b>
-                <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                  无需配置真实 API Key 或 B站账号，大肥鱼使用内置高拟真算法生成生动思考与观点
+                <h3 style={{ fontSize: '16px', fontWeight: 'bold', color: emergencyStop ? '#b91c1c' : '#1e293b' }}>
+                  主人的紧急停止开关 (Emergency Stop)
+                </h3>
+                <p style={{ fontSize: '13px', color: '#64748b', marginTop: '2px' }}>
+                  一旦开启，立即冻结大肥鱼所有的自主漫游、评论发布与外部请求操作，提供绝对安全控制。
                 </p>
               </div>
+            </div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px', color: emergencyStop ? '#dc2626' : '#475569' }}>
               <input
                 type="checkbox"
-                style={{ width: '20px', height: '20px', cursor: 'pointer' }}
-                checked={demoMode}
-                onChange={e => setDemoMode(e.target.checked)}
+                checked={emergencyStop}
+                onChange={e => setEmergencyStop(e.target.checked)}
+                style={{ width: '18px', height: '18px' }}
               />
-            </div>
+              {emergencyStop ? '紧急停止已激活' : '正常待机中'}
+            </label>
           </div>
         </div>
 
-        {/* Character Tendency Card */}
+        {/* Section 2: LLM Configuration */}
         <div className="card">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', color: '#059669' }}>
-            <SettingsIcon size={20} />
-            <h3 style={{ fontSize: '17px', fontWeight: 'bold' }}>角色探索倾向设置</h3>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', color: 'var(--primary)' }}>
+            <Key size={20} />
+            <h3 style={{ fontSize: '16px', fontWeight: 'bold' }}>大语言模型设置（兼容 OpenAI API 格式）</h3>
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div className="grid-2">
             <div>
-              <label style={{ fontSize: '13px', fontWeight: '600', display: 'block', marginBottom: '4px' }}>
-                角色名称
+              <label style={{ fontSize: '13px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '6px' }}>
+                API Base URL：
               </label>
               <input
                 type="text"
                 className="input"
-                value={characterName}
-                onChange={e => setCharacterName(e.target.value)}
+                value={baseUrl}
+                onChange={e => setBaseUrl(e.target.value)}
+                placeholder="例如: https://api.deepseek.com/v1"
                 required
               />
             </div>
 
             <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-                <label style={{ fontSize: '13px', fontWeight: '600' }}>
-                  好奇心强度 (Curiosity): {Math.round(curiosity * 100)}%
-                </label>
-                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                  决定主动发现新视频的求知驱动力
-                </span>
+              <label style={{ fontSize: '13px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '6px' }}>
+                模型名称 (Model)：
+              </label>
+              <input
+                type="text"
+                className="input"
+                value={model}
+                onChange={e => setModel(e.target.value)}
+                placeholder="例如: deepseek-chat"
+                required
+              />
+            </div>
+          </div>
+
+          <div style={{ marginTop: '14px' }}>
+            <label style={{ fontSize: '13px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '6px' }}>
+              API 密钥 (Secret Key)：
+            </label>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <input
+                type={showKey ? 'text' : 'password'}
+                className="input"
+                value={apiKey}
+                onChange={e => setApiKey(e.target.value)}
+                placeholder={settings?.has_api_key ? `已配置: ${settings.llm_api_key_masked} (输入新Key覆盖)` : '输入 sk-... 密钥'}
+              />
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setShowKey(!showKey)}
+                title="显示/隐藏密钥"
+              >
+                {showKey ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
+          </div>
+
+          <div style={{ marginTop: '14px', background: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', color: '#334155' }}>
+              <input
+                type="checkbox"
+                checked={demoMode}
+                onChange={e => setDemoMode(e.target.checked)}
+              />
+              <span><b>启用内置仿真模式 (Demo Mode)：</b> 未配置有效 API Key 或脱机测试时，使用智能仿真思考逻辑。</span>
+            </label>
+          </div>
+        </div>
+
+        {/* Section 3: Autonomous Comment & Publisher Channel */}
+        <div className="card">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', color: '#059669' }}>
+            <Radio size={20} />
+            <h3 style={{ fontSize: '16px', fontWeight: 'bold' }}>自主评论与发布通道设置</h3>
+          </div>
+
+          <div className="grid-2">
+            <div>
+              <label style={{ fontSize: '13px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '6px' }}>
+                默认发布通道：
+              </label>
+              <select
+                className="select"
+                value={publisherType}
+                onChange={e => setPublisherType(e.target.value)}
+                style={{ width: '100%' }}
+              >
+                <option value="pending_approval">主人确认队列 (PendingApproval - 优雅降级/安全待审)</option>
+                <option value="official_api">B站官方开放平台 API (OfficialApi - 需要官方 OAuth2 授权)</option>
+                <option value="webhook">外部 Webhook 转发 (Webhook - 推送自动化与通知)</option>
+                <option value="local_audit">本地合规审计模式 (LocalAudit - 仅本地归档不发外网)</option>
+              </select>
+            </div>
+
+            <div>
+              <label style={{ fontSize: '13px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '6px' }}>
+                每日评论安全上限：
+              </label>
+              <input
+                type="number"
+                min="1"
+                max="10"
+                className="input"
+                value={maxCommentsPerDay}
+                onChange={e => setMaxCommentsPerDay(parseInt(e.target.value) || 3)}
+              />
+            </div>
+          </div>
+
+          <div style={{ marginTop: '14px' }}>
+            <label style={{ fontSize: '13px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '6px' }}>
+              B站开放平台 OAuth2 授权令牌 (Access Token)：
+            </label>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <input
+                type={showBiliToken ? 'text' : 'password'}
+                className="input"
+                value={bilibiliToken}
+                onChange={e => setBilibiliToken(e.target.value)}
+                placeholder={settings?.has_bilibili_token ? `已配置: ${settings.bilibili_token_masked} (输入新Token覆盖)` : '未配置官方 Token（无授权时自动转入主人待审队列）'}
+              />
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setShowBiliToken(!showBiliToken)}
+                title="显示/隐藏"
+              >
+                {showBiliToken ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
+            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+              提示：若未配置官方 Token 或平台缺少写权限，大肥鱼会将评论草稿安全转入待审队列，绝不进行非法注入或伪造发布。
+            </div>
+          </div>
+
+          <div style={{ marginTop: '14px' }}>
+            <label style={{ fontSize: '13px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '6px' }}>
+              Webhook 推送目标 URL（选填）：
+            </label>
+            <input
+              type="text"
+              className="input"
+              value={webhookUrl}
+              onChange={e => setWebhookUrl(e.target.value)}
+              placeholder="例如: https://open.feishu.cn/open-apis/bot/v2/hook/... 或本地自动化脚本"
+            />
+          </div>
+
+          <div style={{ marginTop: '14px', background: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', color: '#334155' }}>
+              <input
+                type="checkbox"
+                checked={autoCommentEnabled}
+                onChange={e => setAutoCommentEnabled(e.target.checked)}
+              />
+              <span><b>允许大肥鱼自主提交发布：</b> 开启后，在通过深度理解、独立观点、无重复度与安全审计时，大肥鱼将自动调用选定通道提交发布。</span>
+            </label>
+          </div>
+        </div>
+
+        {/* Section 4: Autonomous Life Scheduler */}
+        <div className="card">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', color: '#7c3aed' }}>
+            <Clock size={20} />
+            <h3 style={{ fontSize: '16px', fontWeight: 'bold' }}>自主探索作息调度（无需每天手动点击）</h3>
+          </div>
+
+          <div className="grid-2">
+            <div>
+              <label style={{ fontSize: '13px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '6px' }}>
+                探索巡检周期（分钟）：
+              </label>
+              <input
+                type="number"
+                min="5"
+                max="180"
+                className="input"
+                value={intervalMinutes}
+                onChange={e => setIntervalMinutes(parseInt(e.target.value) || 30)}
+              />
+            </div>
+
+            <div>
+              <label style={{ fontSize: '13px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '6px' }}>
+                每日自主探索上限（次数）：
+              </label>
+              <input
+                type="number"
+                min="1"
+                max="20"
+                className="input"
+                value={dailyExploreBudget}
+                onChange={e => setDailyExploreBudget(parseInt(e.target.value) || 5)}
+              />
+            </div>
+          </div>
+
+          <div className="grid-2" style={{ marginTop: '14px' }}>
+            <div>
+              <label style={{ fontSize: '13px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '6px' }}>
+                深夜安睡起始时间（小时 0-23）：
+              </label>
+              <input
+                type="number"
+                min="0"
+                max="23"
+                className="input"
+                value={quietHoursStart}
+                onChange={e => setQuietHoursStart(parseInt(e.target.value) || 23)}
+              />
+            </div>
+
+            <div>
+              <label style={{ fontSize: '13px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '6px' }}>
+                深夜安睡结束时间（小时 0-23）：
+              </label>
+              <input
+                type="number"
+                min="0"
+                max="23"
+                className="input"
+                value={quietHoursEnd}
+                onChange={e => setQuietHoursEnd(parseInt(e.target.value) || 7)}
+              />
+            </div>
+          </div>
+
+          <div style={{ marginTop: '14px', background: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', color: '#334155' }}>
+              <input
+                type="checkbox"
+                checked={schedulerEnabled}
+                onChange={e => setSchedulerEnabled(e.target.checked)}
+              />
+              <span><b>开启后台自主生活：</b> 小肥鱼会在主人使用电脑期间自主漫游、发现视频、休息安睡，并在桌宠上实时更新动作。</span>
+            </label>
+          </div>
+        </div>
+
+        {/* Section 5: Character Exploration Weights */}
+        <div className="card">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', color: '#d97706' }}>
+            <SettingsIcon size={20} />
+            <h3 style={{ fontSize: '16px', fontWeight: 'bold' }}>角色个性与探索偏好</h3>
+          </div>
+
+          <div style={{ marginBottom: '16px' }}>
+            <label style={{ fontSize: '13px', fontWeight: '600', color: '#475569', display: 'block', marginBottom: '6px' }}>
+              桌宠角色名称：
+            </label>
+            <input
+              type="text"
+              className="input"
+              value={characterName}
+              onChange={e => setCharacterName(e.target.value)}
+              placeholder="例如: 大肥鱼"
+              required
+            />
+          </div>
+
+          <div className="grid-2">
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '6px' }}>
+                <span style={{ fontWeight: '600', color: '#475569' }}>求知探索权重 (Curiosity)：</span>
+                <b>{curiosity}</b>
               </div>
               <input
                 type="range"
@@ -226,53 +443,31 @@ export const Settings: React.FC = () => {
                 step="0.05"
                 value={curiosity}
                 onChange={e => setCuriosity(parseFloat(e.target.value))}
-                style={{ width: '100%', cursor: 'pointer' }}
+                style={{ width: '100%' }}
               />
             </div>
 
             <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-                <label style={{ fontSize: '13px', fontWeight: '600' }}>
-                  新颖度权重 (Novelty Weight): {Math.round(novelty * 100)}%
-                </label>
-                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                  越高越倾向探索从未接触过的冷门奇妙领域，跳出信息茧房
-                </span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginBottom: '6px' }}>
+                <span style={{ fontWeight: '600', color: '#475569' }}>新领域探索权重 (Novelty)：</span>
+                <b>{novelty}</b>
               </div>
               <input
                 type="range"
-                min="0.1"
-                max="0.8"
+                min="0.0"
+                max="1.0"
                 step="0.05"
                 value={novelty}
                 onChange={e => setNovelty(parseFloat(e.target.value))}
-                style={{ width: '100%', cursor: 'pointer' }}
+                style={{ width: '100%' }}
               />
             </div>
           </div>
         </div>
 
-        {/* Security & Open Source Compliance Notice */}
-        <div style={{
-          background: '#eff6ff',
-          border: '1px solid #bfdbfe',
-          borderRadius: '10px',
-          padding: '14px 18px',
-          display: 'flex',
-          alignItems: 'flex-start',
-          gap: '12px'
-        }}>
-          <ShieldCheck size={22} style={{ color: '#2563eb', flexShrink: 0, marginTop: '2px' }} />
-          <div style={{ fontSize: '13px', color: '#1e40af', lineHeight: '1.6' }}>
-            <b>隐私与安全承诺：</b>
-            所有 API 密钥均仅保存在本地 <code>data/config.json</code>，受到 <code>.gitignore</code> 严格保护，绝不会被上传或写入代码仓库。
-            B站数据仅以只读方式获取，无任何自动化刷赞、刷评或骚扰行为。
-          </div>
-        </div>
-
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
           <button type="submit" className="btn btn-primary" style={{ padding: '10px 24px' }} disabled={saving}>
-            <Save size={16} /> {saving ? '正在保存...' : '保存所有设置'}
+            <Save size={16} /> {saving ? '保存中...' : '保存全部配置'}
           </button>
         </div>
       </form>

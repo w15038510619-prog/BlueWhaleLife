@@ -5,8 +5,20 @@ a = Analysis(
     ['app_launcher.py'],
     pathex=['.'],
     binaries=[],
-    datas=[('frontend/dist', 'frontend/dist')],
-    hiddenimports=['uvicorn.loops.auto', 'uvicorn.protocols.http.auto', 'uvicorn.lifespan.on', 'anyio._backends._asyncio'],
+    datas=[
+        ('frontend/dist', 'frontend/dist'),
+        ('desktop_pet/assets', 'desktop_pet/assets')
+    ],
+    hiddenimports=[
+        'uvicorn.loops.auto',
+        'uvicorn.protocols.http.auto',
+        'uvicorn.lifespan.on',
+        'anyio._backends._asyncio',
+        'starlette.routing',
+        'starlette.responses',
+        'starlette.middleware',
+        'fastapi.staticfiles'
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

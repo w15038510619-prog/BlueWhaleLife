@@ -37,7 +37,6 @@ def run_api_server():
             access_log=False
         )
     except Exception as e:
-        # Write to local error log if failure occurs
         with open("server_error.log", "w", encoding="utf-8") as f:
             f.write(f"Server startup exception: {e}\n")
 
@@ -66,10 +65,10 @@ def main():
     browser_thread = threading.Thread(target=wait_and_open_browser, daemon=True)
     browser_thread.start()
 
-    # 3. Start PySide6 Desktop Pet (Shark Musume) in main UI thread
+    # 3. Start PySide6 Desktop Pet (Whale Musume / 鲸鱼娘) in main UI thread
     os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
     qt_app = QApplication(sys.argv)
-    qt_app.setApplicationName("BlueWhaleLife - 大肥鱼·鲨鱼娘")
+    qt_app.setApplicationName("BlueWhaleLife - 大肥鱼·鲸鱼娘")
     qt_app.setQuitOnLastWindowClosed(False)
 
     pet = PetWindow(backend_url="http://127.0.0.1:8000")
