@@ -2,33 +2,42 @@ from __future__ import annotations
 import math
 import random
 from PySide6.QtCore import Qt, QTimer, QRectF, QPointF
-from PySide6.QtGui import QPainter, QColor, QPainterPath, QLinearGradient, QBrush, QPen, QFont
+from PySide6.QtGui import QPainter, QColor, QPainterPath, QLinearGradient, QRadialGradient, QBrush, QPen, QFont
 from PySide6.QtWidgets import QWidget
 
 
 class FishRenderer(QWidget):
     """
-    Procedural Vector Animation Renderer for '大肥鱼' (Big Chubby Whale/Fish).
-    Original vector artwork rendered in real-time with smooth 60fps physics & 6 animation states:
-    - idle: gentle floating, breathing, tail sway
-    - thinking: bubble stream, pondering eyes, tilt
-    - happy: bouncy wiggle, twinkling stars, heart sparkles
-    - confused: tilted head, question mark, asymmetric eyes
-    - studying: cute reading glasses, scroll/notebook, focused eyes
-    - resting: closed curved eyes, slow deep breathing, floating 'zZ'
+    Q版二次元【鲨鱼娘 / 鲸鱼娘】(Shark Musume / Whale Girl) 实时矢量动画渲染器
+    参考社区爆火的鲸鱼娘/鲨鱼娘二次元同人看板娘设计：
+    - 呆萌可爱的蓝渐变短发、萌系呆毛、灵动大眼与水手服裙装
+    - 身后标志性的大号软萌鲨鱼尾巴，随呼吸与动作左右摇摆
+    - 头戴标志性的迷你鲨鱼鳍/鲸鱼鳍发饰
+    - 6大生动动画状态：
+        1. idle: 待机站立，自然微呼吸，大尾巴悠悠摆动，灵动眨眼
+        2. thinking: 歪头思索，单手轻托腮，头顶冒出思考泡泡
+        3. happy: 开心蹦跳，双手欢呼举起，笑弯眼，金黄星光粒子飞舞
+        4. confused: 歪头挠头，呆毛翘起，头顶浮现问号与小汗珠
+        5. studying: 戴着金丝圆眼镜，专注抱着一台发光的小笔记本电脑写笔记
+        6. resting: 抱着软绵绵的鲸鱼小抱枕，闭目点头打瞌睡，飘出'zZ'梦境气泡
+    - 交互特性：
+        - 头部区域支持鼠标悬停抚摸（摸头心动/脸红效果）
     """
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedSize(220, 200)
+        self.setFixedSize(240, 270)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setMouseTracking(True)
 
         self.current_state = "idle"  # idle, thinking, happy, confused, studying, resting
         self.anim_tick = 0
         self.blink_tick = 0
         self.is_blinking = False
+        self.is_head_patting = False
+        self.pat_timer = 0
 
-        # Particle lists (bubbles, stars, zZ)
+        # Particle systems
         self.particles: list[dict] = []
 
         # 60 FPS animation timer
@@ -42,64 +51,77 @@ class FishRenderer(QWidget):
             self.particles.clear()
             self.update()
 
+    def mouseMoveEvent(self, event):
+        # Head pat area check (x: 80~160, y: 40~100)
+        x = event.position().x()
+        y = event.position().y()
+        if 80 <= x <= 160 and 40 <= y <= 110:
+            self.is_head_patting = True
+            self.pat_timer = 30
+        super().mouseMoveEvent(event)
+
     def _on_tick(self):
         self.anim_tick += 1
 
+        if self.pat_timer > 0:
+            self.pat_timer -= 1
+            if self.pat_timer == 0:
+                self.is_head_patting = False
+
         # Blinking logic
-        if self.current_state != "resting":
+        if self.current_state != "resting" and not self.is_head_patting:
             self.blink_tick += 1
-            if self.blink_tick > 180 and random.random() < 0.05:
+            if self.blink_tick > 160 and random.random() < 0.06:
                 self.is_blinking = True
-            if self.is_blinking and self.blink_tick > 195:
+            if self.is_blinking and self.blink_tick > 175:
                 self.is_blinking = False
                 self.blink_tick = 0
         else:
             self.is_blinking = False
 
-        # State-based particle generators
-        if self.current_state == "thinking" and self.anim_tick % 25 == 0:
+        # Particle generators based on state
+        if (self.current_state == "thinking") and self.anim_tick % 24 == 0:
             self.particles.append({
                 "type": "bubble",
-                "x": 160 + random.uniform(-10, 10),
+                "x": 170 + random.uniform(-10, 15),
                 "y": 80,
                 "r": random.uniform(3, 7),
-                "life": 40,
-                "max_life": 40
+                "life": 45,
+                "max_life": 45
             })
-        elif self.current_state == "happy" and self.anim_tick % 15 == 0:
+        elif (self.current_state == "happy" or self.is_head_patting) and self.anim_tick % 14 == 0:
             self.particles.append({
-                "type": "star",
-                "x": random.uniform(40, 180),
-                "y": random.uniform(30, 80),
-                "r": random.uniform(4, 8),
-                "life": 30,
-                "max_life": 30
+                "type": "star" if random.random() > 0.4 else "heart",
+                "x": random.uniform(40, 200),
+                "y": random.uniform(40, 100),
+                "r": random.uniform(5, 9),
+                "life": 32,
+                "max_life": 32
             })
-        elif self.current_state == "resting" and self.anim_tick % 45 == 0:
+        elif self.current_state == "resting" and self.anim_tick % 40 == 0:
             self.particles.append({
                 "type": "zZ",
-                "x": 140,
-                "y": 70,
+                "x": 160,
+                "y": 90,
                 "life": 60,
-                "max_life": 60,
-                "scale": 10
+                "max_life": 60
             })
 
         # Update particles
-        alive_particles = []
+        alive = []
         for p in self.particles:
             p["life"] -= 1
             if p["type"] == "bubble":
-                p["y"] -= 1.2
-                p["x"] += math.sin(p["life"] * 0.15) * 0.8
-            elif p["type"] == "star":
-                p["y"] -= 0.8
+                p["y"] -= 1.1
+                p["x"] += math.sin(p["life"] * 0.15) * 0.7
+            elif p["type"] in ["star", "heart"]:
+                p["y"] -= 0.9
             elif p["type"] == "zZ":
                 p["y"] -= 0.6
                 p["x"] += 0.4
             if p["life"] > 0:
-                alive_particles.append(p)
-        self.particles = alive_particles
+                alive.append(p)
+        self.particles = alive
 
         self.update()
 
@@ -107,224 +129,442 @@ class FishRenderer(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        # Base transforms depending on state
         t = self.anim_tick * 0.05
         float_y = 0.0
         tilt = 0.0
-        squash = 1.0
+        scale_x = 1.0
 
         if self.current_state == "idle":
-            float_y = math.sin(t) * 6.0
-            tilt = math.cos(t * 0.8) * 2.0
-        elif self.current_state == "thinking":
-            float_y = math.sin(t * 0.7) * 3.0
-            tilt = -7.0
-        elif self.current_state == "happy":
-            float_y = -abs(math.sin(t * 2.0)) * 14.0
-            tilt = math.sin(t * 2.0) * 8.0
-            squash = 1.0 + math.cos(t * 2.0) * 0.08
-        elif self.current_state == "confused":
             float_y = math.sin(t) * 4.0
-            tilt = 12.0
+            tilt = math.cos(t * 0.7) * 1.5
+        elif self.current_state == "thinking":
+            float_y = math.sin(t * 0.8) * 2.5
+            tilt = -6.0
+        elif self.current_state == "happy" or self.is_head_patting:
+            float_y = -abs(math.sin(t * 2.2)) * 14.0
+            tilt = math.sin(t * 2.2) * 5.0
+            scale_x = 1.0 + math.cos(t * 2.2) * 0.06
+        elif self.current_state == "confused":
+            float_y = math.sin(t) * 3.0
+            tilt = 10.0
         elif self.current_state == "studying":
             float_y = math.sin(t * 0.5) * 2.0
-            tilt = 2.0
+            tilt = 1.0
         elif self.current_state == "resting":
-            float_y = math.sin(t * 0.4) * 2.0
-            tilt = 0.0
-            squash = 1.0 + math.sin(t * 0.4) * 0.04
+            float_y = math.sin(t * 0.35) * 2.0
+            tilt = 2.0
 
-        # Center coordinate for fish body
-        center_x = 105
-        center_y = 100 + float_y
+        center_x = 120
+        center_y = 140 + float_y
 
         painter.save()
         painter.translate(center_x, center_y)
         painter.rotate(tilt)
-        painter.scale(squash, 2.0 - squash)
+        painter.scale(scale_x, 2.0 - scale_x)
 
-        # 1. Tail fin
-        tail_angle = math.sin(t * (2.5 if self.current_state == "happy" else 1.2)) * 14.0
-        self._draw_tail(painter, -65, 0, tail_angle)
+        # 1. Back Layer: Big Shark Tail (Behind body, swaying)
+        tail_speed = 3.0 if (self.current_state == "happy" or self.is_head_patting) else 1.2
+        tail_angle = math.sin(t * tail_speed) * 16.0
+        self._draw_shark_tail(painter, -15, 45, tail_angle)
 
-        # 2. Side pectoral fin (back)
-        self._draw_pectoral_fin(painter, -15, 15, is_front=False)
+        # 2. Back Hair
+        self._draw_back_hair(painter)
 
-        # 3. Main Chubby Whale Body
-        self._draw_body(painter)
+        # 3. Chibi Body & Sailor Dress
+        self._draw_dress_and_legs(painter)
 
-        # 4. Belly
-        self._draw_belly(painter)
+        # 4. Arms & Hand Props (Laptop, Cushion, Hand waves)
+        self._draw_arms_and_props(painter)
 
-        # 5. Side pectoral fin (front)
-        fin_wave = math.sin(t * 1.5) * 8.0
-        self._draw_pectoral_fin(painter, -10, 18, is_front=True, angle=fin_wave)
+        # 5. Chibi Head & Cute Face
+        self._draw_head_and_face(painter)
 
-        # 6. Facial Features (Eyes, Blush, Mouth)
-        self._draw_face(painter)
-
-        # 7. State Accessories (Glasses for studying, question mark for confused)
-        if self.current_state == "studying":
-            self._draw_glasses(painter)
-        elif self.current_state == "confused":
-            self._draw_question_mark(painter)
+        # 6. Shark Fin Headwear & Ahoge (呆毛)
+        self._draw_shark_headwear(painter)
 
         painter.restore()
 
-        # 8. Render Particles (Screen Coordinates)
+        # 7. Render Particles (Screen coords)
         self._draw_particles(painter)
 
-    def _draw_body(self, p: QPainter):
+    def _draw_shark_tail(self, p: QPainter, x: float, y: float, angle: float):
+        p.save()
+        p.translate(x, y)
+        p.rotate(angle)
+
+        # Large, chubby shark tail extending back and curving up
         path = QPainterPath()
-        # Chubby teardrop/whale shape
-        path.moveTo(55, -10)
-        # Top arc
-        path.cubicTo(30, -50, -40, -45, -70, -5)
-        # Tail connection
-        path.lineTo(-75, 5)
-        # Belly curve
-        path.cubicTo(-40, 48, 25, 48, 55, 10)
-        # Snout curve
-        path.cubicTo(65, 5, 65, -5, 55, -10)
+        path.moveTo(0, 0)
+        # Tail top curve
+        path.cubicTo(-40, 5, -80, -25, -95, -55)
+        # Upper fin lobe
+        path.cubicTo(-115, -75, -125, -60, -105, -35)
+        # Fin fork notch
+        path.lineTo(-90, -30)
+        # Lower fin lobe
+        path.cubicTo(-110, -15, -100, 5, -80, 5)
+        # Underbelly curve back to base
+        path.cubicTo(-50, 15, -20, 18, 0, 10)
         path.closeSubpath()
 
-        # Beautiful ocean blue gradient
-        grad = QLinearGradient(0, -50, 0, 45)
-        grad.setColorAt(0.0, QColor(90, 175, 255))
-        grad.setColorAt(1.0, QColor(40, 115, 215))
+        # Gradient: Navy ocean blue to bright azure
+        grad = QLinearGradient(0, 0, -100, -50)
+        grad.setColorAt(0.0, QColor(41, 128, 220))
+        grad.setColorAt(0.6, QColor(30, 95, 180))
+        grad.setColorAt(1.0, QColor(15, 60, 130))
 
-        p.setPen(QPen(QColor(25, 80, 160), 2.5))
+        p.setPen(QPen(QColor(18, 55, 110), 2.5))
         p.setBrush(QBrush(grad))
         p.drawPath(path)
 
-    def _draw_belly(self, p: QPainter):
-        path = QPainterPath()
-        path.moveTo(-45, 15)
-        path.cubicTo(-20, 40, 20, 40, 50, 10)
-        path.cubicTo(40, 25, 0, 36, -45, 15)
-        path.closeSubpath()
-
-        belly_grad = QLinearGradient(0, 10, 0, 40)
-        belly_grad.setColorAt(0.0, QColor(245, 250, 255, 230))
-        belly_grad.setColorAt(1.0, QColor(215, 235, 255, 240))
+        # White underside patch of the shark tail
+        white_path = QPainterPath()
+        white_path.moveTo(0, 10)
+        white_path.cubicTo(-20, 18, -50, 15, -80, 5)
+        white_path.cubicTo(-70, -2, -30, 2, 0, 4)
+        white_path.closeSubpath()
 
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QBrush(belly_grad))
-        p.drawPath(path)
+        p.setBrush(QBrush(QColor(245, 250, 255, 230)))
+        p.drawPath(white_path)
 
-    def _draw_tail(self, p: QPainter, x: float, y: float, angle: float):
-        p.save()
-        p.translate(x, y)
-        p.rotate(angle)
+        p.restore()
 
+    def _draw_back_hair(self, p: QPainter):
+        # Soft blue hair spreading behind the neck
         path = QPainterPath()
-        path.moveTo(0, 0)
-        path.cubicTo(-15, -25, -35, -28, -28, -5)
-        path.cubicTo(-25, 0, -25, 0, -28, 5)
-        path.cubicTo(-35, 28, -15, 25, 0, 0)
+        path.moveTo(-36, -10)
+        path.cubicTo(-50, 20, -45, 50, -35, 55)
+        path.cubicTo(-25, 45, -25, 25, -20, 15)
+        path.lineTo(20, 15)
+        path.cubicTo(25, 25, 25, 45, 35, 55)
+        path.cubicTo(45, 50, 50, 20, 36, -10)
         path.closeSubpath()
 
-        grad = QLinearGradient(-30, -20, 0, 20)
-        grad.setColorAt(0.0, QColor(80, 165, 250))
-        grad.setColorAt(1.0, QColor(45, 120, 220))
+        grad = QLinearGradient(0, -10, 0, 55)
+        grad.setColorAt(0.0, QColor(60, 140, 235))
+        grad.setColorAt(1.0, QColor(35, 90, 180))
 
-        p.setPen(QPen(QColor(25, 80, 160), 2.0))
+        p.setPen(QPen(QColor(20, 60, 125), 2.0))
         p.setBrush(QBrush(grad))
         p.drawPath(path)
-        p.restore()
 
-    def _draw_pectoral_fin(self, p: QPainter, x: float, y: float, is_front: bool, angle: float = 0.0):
-        p.save()
-        p.translate(x, y)
-        p.rotate(angle)
+    def _draw_dress_and_legs(self, p: QPainter):
+        # 1. Little legs and shoes
+        leg_color = QColor(255, 255, 255)  # White knee socks
+        p.setPen(QPen(QColor(200, 215, 235), 1.5))
+        p.setBrush(QBrush(leg_color))
+        p.drawRoundedRect(QRectF(-16, 50, 11, 24), 5, 5)
+        p.drawRoundedRect(QRectF(5, 50, 11, 24), 5, 5)
 
-        path = QPainterPath()
-        path.moveTo(0, 0)
-        path.cubicTo(5, 15, 15, 25, 5, 28)
-        path.cubicTo(-8, 28, -12, 15, 0, 0)
-        path.closeSubpath()
+        # Shoes (Dark navy mary-janes)
+        shoe_color = QColor(25, 50, 95)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(shoe_color))
+        p.drawRoundedRect(QRectF(-18, 68, 14, 9), 4, 4)
+        p.drawRoundedRect(QRectF(4, 68, 14, 9), 4, 4)
 
-        color = QColor(60, 140, 240, 255 if is_front else 160)
-        p.setPen(QPen(QColor(25, 80, 160), 1.8))
-        p.setBrush(QBrush(color))
-        p.drawPath(path)
-        p.restore()
+        # 2. Sailor Dress (Skirt + Top)
+        skirt_path = QPainterPath()
+        skirt_path.moveTo(-22, 28)
+        skirt_path.lineTo(-34, 52)
+        skirt_path.cubicTo(-15, 57, 15, 57, 34, 52)
+        skirt_path.lineTo(22, 28)
+        skirt_path.closeSubpath()
 
-    def _draw_face(self, p: QPainter):
-        # 1. Blush
-        blush_color = QColor(255, 140, 160, 140)
+        dress_grad = QLinearGradient(0, 15, 0, 55)
+        dress_grad.setColorAt(0.0, QColor(35, 75, 145))
+        dress_grad.setColorAt(1.0, QColor(20, 50, 105))
+
+        p.setPen(QPen(QColor(15, 40, 85), 2.0))
+        p.setBrush(QBrush(dress_grad))
+        p.drawPath(skirt_path)
+
+        # White skirt hem stripes
+        p.setPen(QPen(QColor(255, 255, 255, 220), 2.0))
+        p.drawArc(QRectF(-32, 45, 64, 10), 10 * 16, 160 * 16)
+
+        # Shirt Torso
+        torso_path = QPainterPath()
+        torso_path.moveTo(-20, 10)
+        torso_path.lineTo(-22, 30)
+        torso_path.lineTo(22, 30)
+        torso_path.lineTo(20, 10)
+        torso_path.closeSubpath()
+
+        p.setPen(QPen(QColor(200, 215, 235), 1.5))
+        p.setBrush(QBrush(QColor(255, 255, 255)))
+        p.drawPath(torso_path)
+
+        # Sailor collar & Red Tie
+        collar = QPainterPath()
+        collar.moveTo(-22, 10)
+        collar.lineTo(0, 24)
+        collar.lineTo(22, 10)
+        collar.lineTo(16, 5)
+        collar.lineTo(-16, 5)
+        collar.closeSubpath()
+
+        p.setPen(QPen(QColor(20, 50, 105), 1.5))
+        p.setBrush(QBrush(QColor(40, 95, 180)))
+        p.drawPath(collar)
+
+        # Red ribbon tie
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(QColor(235, 65, 85)))
+        p.drawEllipse(QRectF(-4, 18, 8, 8))
+        tie_path = QPainterPath()
+        tie_path.moveTo(-2, 24)
+        tie_path.lineTo(-6, 32)
+        tie_path.lineTo(0, 30)
+        tie_path.lineTo(6, 32)
+        tie_path.lineTo(2, 24)
+        tie_path.closeSubpath()
+        p.drawPath(tie_path)
+
+    def _draw_arms_and_props(self, p: QPainter):
+        skin_color = QColor(255, 226, 214)
+
+        if self.current_state == "studying":
+            # Holding a cute mini laptop
+            # Laptop base
+            p.setPen(QPen(QColor(80, 120, 180), 2.0))
+            p.setBrush(QBrush(QColor(225, 235, 250)))
+            p.drawRoundedRect(QRectF(-24, 22, 48, 16), 3, 3)
+
+            # Glowing Laptop Screen
+            p.setBrush(QBrush(QColor(170, 225, 255, 240)))
+            p.drawRoundedRect(QRectF(-20, 8, 40, 20), 3, 3)
+            # Little fish logo on back of screen
+            p.setPen(QPen(QColor(40, 120, 220), 1.5))
+            p.drawArc(QRectF(-6, 14, 12, 8), 0, 360 * 16)
+
+            # Cute hands holding sides of laptop
+            p.setPen(QPen(QColor(230, 180, 160), 1.5))
+            p.setBrush(QBrush(skin_color))
+            p.drawEllipse(QRectF(-26, 22, 10, 10))
+            p.drawEllipse(QRectF(16, 22, 10, 10))
+
+        elif self.current_state == "resting":
+            # Hugging a cute shark plushie pillow
+            plush = QPainterPath()
+            plush.moveTo(-22, 16)
+            plush.cubicTo(-28, 30, -22, 40, 0, 38)
+            plush.cubicTo(22, 40, 28, 30, 22, 16)
+            plush.cubicTo(10, 14, -10, 14, -22, 16)
+            plush.closeSubpath()
+
+            p.setPen(QPen(QColor(30, 80, 150), 2.0))
+            p.setBrush(QBrush(QColor(90, 175, 245)))
+            p.drawPath(plush)
+            # Plush eyes (^ ^)
+            p.setPen(QPen(QColor(20, 50, 90), 1.5))
+            p.drawArc(QRectF(-12, 22, 7, 5), 0, 180 * 16)
+            p.drawArc(QRectF(5, 22, 7, 5), 0, 180 * 16)
+
+            # Arms wrapped around
+            p.setPen(QPen(QColor(230, 180, 160), 1.5))
+            p.setBrush(QBrush(skin_color))
+            p.drawEllipse(QRectF(-25, 22, 10, 10))
+            p.drawEllipse(QRectF(15, 22, 10, 10))
+
+        elif self.current_state == "happy" or self.is_head_patting:
+            # Both hands raised up in joy!
+            p.setPen(QPen(QColor(230, 180, 160), 1.5))
+            p.setBrush(QBrush(skin_color))
+            # Sleeves up
+            p.setPen(QPen(QColor(20, 50, 105), 1.5))
+            p.setBrush(QBrush(QColor(255, 255, 255)))
+            p.drawRoundedRect(QRectF(-32, 6, 12, 18), 4, 4)
+            p.drawRoundedRect(QRectF(20, 6, 12, 18), 4, 4)
+            # Hands
+            p.setBrush(QBrush(skin_color))
+            p.drawEllipse(QRectF(-34, -2, 10, 10))
+            p.drawEllipse(QRectF(24, -2, 10, 10))
+
+        elif self.current_state == "thinking":
+            # One hand touching chin
+            p.setPen(QPen(QColor(230, 180, 160), 1.5))
+            p.setBrush(QBrush(skin_color))
+            p.drawEllipse(QRectF(10, 4, 9, 9))
+            p.drawEllipse(QRectF(-22, 22, 9, 9))
+
+        elif self.current_state == "confused":
+            # Hand behind head, scratching head
+            p.setPen(QPen(QColor(230, 180, 160), 1.5))
+            p.setBrush(QBrush(skin_color))
+            p.drawEllipse(QRectF(24, -14, 9, 9))
+            p.drawEllipse(QRectF(-22, 24, 9, 9))
+
+        else:
+            # Idle: hands naturally at sides
+            p.setPen(QPen(QColor(230, 180, 160), 1.5))
+            p.setBrush(QBrush(skin_color))
+            p.drawEllipse(QRectF(-26, 22, 10, 10))
+            p.drawEllipse(QRectF(16, 22, 10, 10))
+
+    def _draw_head_and_face(self, p: QPainter):
+        skin_color = QColor(255, 235, 226)
+
+        # 1. Chibi Face shape
+        head_path = QPainterPath()
+        head_path.addRoundedRect(QRectF(-38, -48, 76, 62), 30, 30)
+
+        p.setPen(QPen(QColor(235, 195, 175), 1.5))
+        p.setBrush(QBrush(skin_color))
+        p.drawPath(head_path)
+
+        # 2. Anime Big Eyes
+        eye_y = -18
+        if self.current_state == "resting":
+            # Calm sleeping curved lashes
+            p.setPen(QPen(QColor(30, 55, 95), 2.8, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+            path_l = QPainterPath()
+            path_l.moveTo(-26, eye_y)
+            path_l.cubicTo(-20, eye_y + 6, -14, eye_y + 6, -8, eye_y)
+            p.drawPath(path_l)
+
+            path_r = QPainterPath()
+            path_r.moveTo(8, eye_y)
+            path_r.cubicTo(14, eye_y + 6, 20, eye_y + 6, 26, eye_y)
+            p.drawPath(path_r)
+
+        elif self.current_state == "happy" or self.is_head_patting:
+            # Joyful happy arcs (^ ^)
+            p.setPen(QPen(QColor(25, 50, 90), 3.0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+            path_l = QPainterPath()
+            path_l.moveTo(-26, eye_y + 2)
+            path_l.cubicTo(-20, eye_y - 7, -14, eye_y - 7, -8, eye_y + 2)
+            p.drawPath(path_l)
+
+            path_r = QPainterPath()
+            path_r.moveTo(8, eye_y + 2)
+            path_r.cubicTo(14, eye_y - 7, 20, eye_y - 7, 26, eye_y + 2)
+            p.drawPath(path_r)
+
+        elif self.is_blinking:
+            # Blinking line
+            p.setPen(QPen(QColor(25, 50, 90), 2.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+            p.drawLine(-25, eye_y, -9, eye_y)
+            p.drawLine(9, eye_y, 25, eye_y)
+
+        else:
+            # Deep sparkling anime eyes
+            for eye_x in [-18, 18]:
+                # Sclera / eye background
+                p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(QBrush(QColor(255, 255, 255)))
+                p.drawEllipse(QRectF(eye_x - 10, eye_y - 12, 20, 24))
+
+                # Ocean Blue Gradient Iris
+                iris_grad = QLinearGradient(eye_x, eye_y - 12, eye_x, eye_y + 12)
+                iris_grad.setColorAt(0.0, QColor(20, 45, 95))
+                iris_grad.setColorAt(0.5, QColor(35, 110, 215))
+                iris_grad.setColorAt(1.0, QColor(100, 200, 255))
+
+                p.setBrush(QBrush(iris_grad))
+                p.drawEllipse(QRectF(eye_x - 8, eye_y - 10, 16, 20))
+
+                # Pupil
+                p.setBrush(QBrush(QColor(15, 30, 65)))
+                p.drawEllipse(QRectF(eye_x - 4, eye_y - 4, 8, 10))
+
+                # Big sparkling light reflection
+                p.setBrush(QBrush(QColor(255, 255, 255, 240)))
+                p.drawEllipse(QRectF(eye_x - 5, eye_y - 8, 6, 6))
+                p.drawEllipse(QRectF(eye_x + 1, eye_y + 2, 3, 3))
+
+                # Top Eyelashes
+                p.setPen(QPen(QColor(20, 40, 80), 2.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+                p.drawArc(QRectF(eye_x - 10, eye_y - 14, 20, 10), 20 * 16, 140 * 16)
+
+        # 3. Cute Blush (粉嫩红晕)
+        blush_color = QColor(255, 130, 160, 180 if self.is_head_patting else 120)
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QBrush(blush_color))
-        p.drawEllipse(QRectF(22, 2, 14, 8))
+        p.drawEllipse(QRectF(-32, -8, 14, 8))
+        p.drawEllipse(QRectF(18, -8, 14, 8))
 
-        # 2. Eye
-        eye_x, eye_y = 35, -12
-        if self.current_state == "resting":
-            # Closed calm curved line
-            p.setPen(QPen(QColor(20, 50, 90), 2.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-            path = QPainterPath()
-            path.moveTo(eye_x - 7, eye_y)
-            path.cubicTo(eye_x - 3, eye_y + 5, eye_x + 3, eye_y + 5, eye_x + 7, eye_y)
-            p.drawPath(path)
-        elif self.current_state == "happy":
-            # Cheerful curve ^
-            p.setPen(QPen(QColor(20, 50, 90), 2.8, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-            path = QPainterPath()
-            path.moveTo(eye_x - 7, eye_y + 2)
-            path.cubicTo(eye_x - 3, eye_y - 6, eye_x + 3, eye_y - 6, eye_x + 7, eye_y + 2)
-            p.drawPath(path)
-        elif self.is_blinking:
-            # Blink line
-            p.setPen(QPen(QColor(20, 50, 90), 2.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-            p.drawLine(eye_x - 7, eye_y, eye_x + 7, eye_y)
+        # 4. Tiny Cute Mouth
+        p.setPen(QPen(QColor(200, 60, 90), 2.0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        if self.current_state in ["happy", "studying"] or self.is_head_patting:
+            mouth = QPainterPath()
+            mouth.moveTo(-5, 0)
+            mouth.cubicTo(-2, 6, 2, 6, 5, 0)
+            p.drawPath(mouth)
+        elif self.current_state in ["thinking", "confused"]:
+            p.setBrush(QBrush(QColor(255, 140, 160)))
+            p.drawEllipse(QRectF(-2, 1, 5, 5))
         else:
-            # Open cute shiny eye
-            p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(QBrush(QColor(20, 45, 80)))
-            p.drawEllipse(QRectF(eye_x - 6, eye_y - 8, 12, 14))
+            mouth = QPainterPath()
+            mouth.moveTo(-4, 1)
+            mouth.cubicTo(-1, 4, 2, 4, 4, 1)
+            p.drawPath(mouth)
 
-            # Highlights
-            p.setBrush(QBrush(QColor(255, 255, 255)))
-            p.drawEllipse(QRectF(eye_x - 4, eye_y - 6, 5, 5))
-            p.drawEllipse(QRectF(eye_x + 1, eye_y + 1, 2.5, 2.5))
+        # 5. Front Bangs & Side Locks (海蓝色渐变刘海)
+        hair_path = QPainterPath()
+        hair_path.moveTo(-40, -32)
+        hair_path.cubicTo(-44, -10, -42, 15, -34, 24)  # Left side lock
+        hair_path.lineTo(-28, 5)
+        hair_path.cubicTo(-24, -15, -12, -18, -6, -24)  # Left fringe
+        hair_path.cubicTo(0, -18, 10, -15, 18, -26)     # Middle fringe
+        hair_path.cubicTo(26, -18, 30, 5, 34, 24)       # Right side lock
+        hair_path.cubicTo(42, 15, 44, -10, 40, -32)
+        hair_path.cubicTo(30, -58, -30, -58, -40, -32)
+        hair_path.closeSubpath()
 
-        # 3. Mouth
-        p.setPen(QPen(QColor(20, 50, 90), 2.0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-        mouth_path = QPainterPath()
-        if self.current_state == "happy":
-            # Open laughing mouth
-            mouth_path.moveTo(48, 5)
-            mouth_path.cubicTo(52, 12, 58, 12, 60, 5)
-        elif self.current_state == "thinking" or self.current_state == "confused":
-            # Small circle 'o'
-            p.drawEllipse(QRectF(52, 4, 5, 5))
-            return
-        else:
-            # Gentle smile
-            mouth_path.moveTo(48, 5)
-            mouth_path.cubicTo(52, 9, 56, 9, 59, 6)
-        p.drawPath(mouth_path)
+        hair_grad = QLinearGradient(0, -55, 0, 25)
+        hair_grad.setColorAt(0.0, QColor(70, 150, 245))
+        hair_grad.setColorAt(0.7, QColor(45, 115, 215))
+        hair_grad.setColorAt(1.0, QColor(90, 200, 255))  # Highlight tips
 
-    def _draw_glasses(self, p: QPainter):
-        p.setPen(QPen(QColor(230, 160, 40), 2.0))
-        p.setBrush(QBrush(QColor(255, 255, 255, 60)))
-        # Lens around eye
-        p.drawEllipse(QRectF(26, -20, 18, 18))
-        # Frame bridge
-        p.drawLine(44, -11, 52, -10)
+        p.setPen(QPen(QColor(20, 65, 135), 2.0))
+        p.setBrush(QBrush(hair_grad))
+        p.drawPath(hair_path)
 
-    def _draw_question_mark(self, p: QPainter):
-        p.setPen(QPen(QColor(255, 180, 50), 3.0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-        font = QFont("Arial", 16, QFont.Weight.Bold)
-        p.setFont(font)
-        p.drawText(QPointF(40, -30), "?")
+        # 6. Glasses for 'studying' state
+        if self.current_state == "studying":
+            p.setPen(QPen(QColor(235, 175, 50), 2.0))
+            p.setBrush(QBrush(QColor(255, 255, 255, 50)))
+            p.drawEllipse(QRectF(-28, -24, 20, 20))
+            p.drawEllipse(QRectF(8, -24, 20, 20))
+            p.drawLine(-8, -14, 8, -14)
+
+    def _draw_shark_headwear(self, p: QPainter):
+        # 1. Cute Shark Fin Hairclip on right side
+        fin = QPainterPath()
+        fin.moveTo(18, -46)
+        fin.cubicTo(25, -68, 42, -72, 38, -48)
+        fin.closeSubpath()
+
+        p.setPen(QPen(QColor(15, 50, 110), 2.0))
+        p.setBrush(QBrush(QColor(40, 110, 200)))
+        p.drawPath(fin)
+
+        # 2. Bouncing Ahoge (萌萌呆毛)
+        t = self.anim_tick * 0.08
+        ahoge_sway = math.sin(t) * 5.0
+        ahoge = QPainterPath()
+        ahoge.moveTo(0, -48)
+        ahoge.cubicTo(-8 + ahoge_sway, -65, 12 + ahoge_sway, -75, 4 + ahoge_sway, -82)
+
+        p.setPen(QPen(QColor(50, 125, 225), 3.0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        p.setBrush(Qt.PenStyle.NoPen)
+        p.drawPath(ahoge)
+
+        # 3. Confused Question Mark
+        if self.current_state == "confused":
+            p.setPen(QPen(QColor(255, 180, 40), 3.0))
+            font = QFont("Arial", 18, QFont.Weight.Bold)
+            p.setFont(font)
+            p.drawText(QPointF(40, -45), "？")
 
     def _draw_particles(self, p: QPainter):
         for part in self.particles:
             alpha = int(255 * (part["life"] / part["max_life"]))
             if part["type"] == "bubble":
-                p.setPen(QPen(QColor(180, 220, 255, alpha), 1.5))
-                p.setBrush(QBrush(QColor(255, 255, 255, int(alpha * 0.3))))
+                p.setPen(QPen(QColor(180, 225, 255, alpha), 1.5))
+                p.setBrush(QBrush(QColor(255, 255, 255, int(alpha * 0.4))))
                 r = part["r"]
                 p.drawEllipse(QRectF(part["x"] - r, part["y"] - r, r * 2, r * 2))
             elif part["type"] == "star":
@@ -342,8 +582,17 @@ class FishRenderer(QWidget):
                 path.lineTo(x - r * 0.3, y - r * 0.3)
                 path.closeSubpath()
                 p.drawPath(path)
+            elif part["type"] == "heart":
+                p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(QBrush(QColor(255, 120, 150, alpha)))
+                x, y = part["x"], part["y"]
+                path = QPainterPath()
+                path.moveTo(x, y + 4)
+                path.cubicTo(x - 6, y - 4, x - 6, y - 8, x, y - 4)
+                path.cubicTo(x + 6, y - 8, x + 6, y - 4, x, y + 4)
+                p.drawPath(path)
             elif part["type"] == "zZ":
-                p.setPen(QPen(QColor(120, 170, 240, alpha), 2.0))
-                font = QFont("Comic Sans MS", 12, QFont.Weight.Bold)
+                p.setPen(QPen(QColor(130, 185, 255, alpha), 2.2))
+                font = QFont("Comic Sans MS", 13, QFont.Weight.Bold)
                 p.setFont(font)
                 p.drawText(QPointF(part["x"], part["y"]), "zZ")

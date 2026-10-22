@@ -32,13 +32,13 @@ class PetWindow(QWidget):
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
 
-        # Fish Vector Renderer
+        # Fish / Shark Musume Vector Renderer
         self.renderer = FishRenderer(self)
         self.layout.addWidget(self.renderer)
 
         # Initial Position (bottom right of primary screen)
         screen = QApplication.primaryScreen().geometry()
-        self.move(screen.width() - 280, screen.height() - 280)
+        self.move(screen.width() - 300, screen.height() - 340)
 
         # Chat dialog
         self.chat_dialog = ChatDialog(
@@ -134,8 +134,13 @@ class PetWindow(QWidget):
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            # If quick click without significant drag, toggle bubble
-            self._show_bubble()
+            # If click was in head area (patting), show cheerful reaction
+            click_pos = event.position()
+            if 80 <= click_pos.x() <= 160 and 40 <= click_pos.y() <= 120:
+                self.renderer.set_state("happy")
+                self.bubble.show_message("心动开心", "摸摸头~ 咕噜噜！只要主人在身边，大肥鱼就充满动力啦！✨", duration_ms=4000)
+            else:
+                self._show_bubble()
 
     def contextMenuEvent(self, event):
         menu = QMenu(self)

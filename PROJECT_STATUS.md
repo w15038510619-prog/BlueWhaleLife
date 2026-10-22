@@ -25,7 +25,8 @@
 | **视频深度理解** | 生成概述、所学、观点、存疑、价值评估、评论草稿 | ✅ **已达成**。实现 `VideoAnalyzer`，加入 Prompt Injection 防御标签与跨视频历史引用。 | 单元测试 `test_api_watch_and_diary` 通过 |
 | **SQLite 长期记忆** | 观影轨迹、知识笔记、搜索、软遗忘、自动去重 | ✅ **已达成**。实现 `MemoryService`，5 张核心数据表自动初始化与事务支持。 | 单元测试 `test_memory_record_and_retrieve` 通过 |
 | **日常反思与回滚** | 回顾四个核心问题，生成成长日志，性格版本化且可回滚 | ✅ **已达成**。实现 `ReflectionEngine` 与 `SoulEngine`，支持回滚至任意历史版本。 | 单元测试 `test_soul_evolution_and_rollback` 通过 |
-| **桌面小肥鱼 (桌宠)** | Windows 优先，纯原创矢量动画，6 种状态，交互对话气泡 | ✅ **已达成**。基于 PySide6 实现 60FPS 矢量动画与无边框透明拖拽窗口、粒子特效与快捷聊天。 | `python -c "import desktop_pet.pet_window"` 0错误 |
+| **桌面看板娘 (鲨鱼娘/鲸鱼娘)** | 参考社区爆火的 Q版二次元鲨鱼娘/鲸鱼娘（如 dsh-whale-musume），纯原创矢量 60FPS 动画，大尾巴摇动，6种拟人状态与摸头心动交互 | ✅ **已达成**。基于 PySide6 实现萌系水手服蓝发双马尾鲨鱼娘，抱笔记本写笔记、抱抱枕打瞌睡、摸头心动粒子与快捷聊天。 | `python -c "import desktop_pet.fish_renderer"` 0错误 |
+| **全套打包与极简运行** | 前端静态内嵌 FastAPI + PyInstaller 桌宠打包 + 根目录单文件一键运行 | ✅ **已达成**。FastAPI 托管 `frontend/dist`，桌宠编译为 `dist/BlueWhalePet/BlueWhalePet.exe`，根目录提供 `启动大肥鱼.bat`。 | 双击启动、无需额外运行 npm 服务 |
 | **管理面板前端** | React 18 + TypeScript + Vite，五大核心控制页面 | ✅ **已达成**。五大页面全部完成，与后端接口完全连通，支持评论草稿在线修改与一键复制。 | `npm run build` 耗时 2.46s，0 TypeScript/打包警告 |
 | **Windows 批处理脚本** | 快速开箱运行，无门槛启动 | ✅ **已达成**。编写 `run_all.bat`, `run_backend.bat`, `run_frontend.bat`, `run_desktop_pet.bat`。 | 批处理测试有效 |
 | **版本管理与文档** | Git 仓库初始化，排除敏感文件与密钥 | ✅ **已达成**。配置严密的 `.gitignore`，编写完整中英技术文档。 | Git 仓库已就绪 |

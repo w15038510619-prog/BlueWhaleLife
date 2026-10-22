@@ -20,11 +20,11 @@ export const App: React.FC = () => {
       {/* Sidebar Navigation */}
       <aside className="sidebar">
         <div className="brand-header">
-          <div className="brand-avatar">
-            🐟
+          <div className="brand-avatar" style={{ background: 'linear-gradient(135deg, #38bdf8, #2563eb)' }}>
+            🦈
           </div>
           <div className="brand-text">
-            <h1>大肥鱼的B站生活</h1>
+            <h1>大肥鱼 · 鲨鱼娘</h1>
             <p>BlueWhaleLife v1.0</p>
           </div>
         </div>

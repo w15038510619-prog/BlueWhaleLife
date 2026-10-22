@@ -11,7 +11,7 @@ export const Home: React.FC<HomeProps> = ({ onNavigate }) => {
   const [status, setStatus] = useState<PetStatus | null>(null);
   const [chatInput, setChatInput] = useState('');
   const [messages, setMessages] = useState<Array<{ sender: 'user' | 'pet'; text: string }>>([
-    { sender: 'pet', text: '咕噜噜~ 嗨！我是大肥鱼。今天想和我聊聊什么，还是让我出去逛逛探索新视频？' }
+    { sender: 'pet', text: '咕噜噜~ 嗨！我是大肥鱼（你的专属鲨鱼娘看板）！今天想和我聊聊什么，还是让我出去逛逛B站探索新奇视频？' }
   ]);
   const [loadingChat, setLoadingChat] = useState(false);
   const [recentVideo, setRecentVideo] = useState<VideoAnalysis | null>(null);
@@ -115,18 +115,18 @@ export const Home: React.FC<HomeProps> = ({ onNavigate }) => {
               width: '84px',
               height: '84px',
               borderRadius: '20px',
-              background: 'linear-gradient(135deg, #93c5fd, #3b82f6)',
+              background: 'linear-gradient(135deg, #38bdf8, #2563eb)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               fontSize: '44px',
               boxShadow: '0 8px 16px rgba(59, 130, 246, 0.25)'
             }}>
-              🐟
+              🦈
             </div>
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <h3 style={{ fontSize: '20px', fontWeight: 'bold' }}>大肥鱼</h3>
+                <h3 style={{ fontSize: '20px', fontWeight: 'bold' }}>大肥鱼 (鲨鱼娘)</h3>
                 <span className="badge badge-blue">
                   {getStateEmoji(status?.state)} {status?.state || 'idle'}
                 </span>
