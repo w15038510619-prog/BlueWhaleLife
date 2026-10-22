@@ -3,15 +3,58 @@ import os
 import time
 import threading
 import webbrowser
+import httpx
 import uvicorn
 from PySide6.QtWidgets import QApplication
+
+# 1. Windows No-Console Mode Stdout/Stderr Guard
+# Prevents uvicorn and click from crashing with AttributeError: 'NoneType' object has no attribute 'isatty'
+class SafeStream:
+    def write(self, s):
+        pass
+    def flush(self):
+        pass
+    def isatty(self):
+        return False
+
+if sys.stdout is None:
+    sys.stdout = SafeStream()
+if sys.stderr is None:
+    sys.stderr = SafeStream()
+
 from backend.app.main import app as fastapi_app
 from desktop_pet.pet_window import PetWindow
 
 
 def run_api_server():
-    """Run uvicorn in a background thread"""
-    uvicorn.run(fastapi_app, host="127.0.0.1", port=8000, log_level="warning")
+    """Run uvicorn in a background daemon thread with safe log config"""
+    try:
+        uvicorn.run(
+            fastapi_app,
+            host="127.0.0.1",
+            port=8000,
+            log_config=None,
+            access_log=False
+        )
+    except Exception as e:
+        # Write to local error log if failure occurs
+        with open("server_error.log", "w", encoding="utf-8") as f:
+            f.write(f"Server startup exception: {e}\n")
+
+
+def wait_and_open_browser():
+    """Waits until the backend server is actually responding before opening browser"""
+    for _ in range(30):
+        try:
+            res = httpx.get("http://127.0.0.1:8000/api/health", timeout=1.0)
+            if res.status_code == 200:
+                webbrowser.open("http://127.0.0.1:8000")
+                return
+        except Exception:
+            pass
+        time.sleep(0.3)
+    # Fallback open if wait loop times out
+    webbrowser.open("http://127.0.0.1:8000")
 
 
 def main():
@@ -19,12 +62,8 @@ def main():
     server_thread = threading.Thread(target=run_api_server, daemon=True)
     server_thread.start()
 
-    # 2. Automatically open web dashboard after a brief delay
-    def _open_browser():
-        time.sleep(1.8)
-        webbrowser.open("http://127.0.0.1:8000")
-
-    browser_thread = threading.Thread(target=_open_browser, daemon=True)
+    # 2. Wait for server to be responsive, then open browser
+    browser_thread = threading.Thread(target=wait_and_open_browser, daemon=True)
     browser_thread.start()
 
     # 3. Start PySide6 Desktop Pet (Shark Musume) in main UI thread
