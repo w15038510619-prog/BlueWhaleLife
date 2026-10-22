@@ -1,5 +1,6 @@
 from __future__ import annotations
 import ctypes
+from ctypes import wintypes
 import os
 import sys
 import time
@@ -74,18 +75,20 @@ class PetWindow(QWidget):
         self.signals.explore_finished.connect(self._on_explore_finished)
         self.signals.explore_failed.connect(self._on_explore_failed)
 
-        # Frameless, transparent, always on top
+        # Frameless, transparent, always on top, Tool window (supports Windows OLE DropTarget)
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint |
             Qt.WindowType.WindowStaysOnTopHint |
-            Qt.WindowType.SubWindow
+            Qt.WindowType.Tool
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         # Enable dragging files onto the pet
         self.setAcceptDrops(True)
         self.recycle_without_confirm = False
         try:
-            enable_windows_drag_drop_privilege(int(self.winId()))
+            hwnd = int(self.winId())
+            enable_windows_drag_drop_privilege(hwnd)
+            ctypes.windll.shell32.DragAcceptFiles(hwnd, True)
         except Exception:
             pass
 
@@ -270,6 +273,26 @@ class PetWindow(QWidget):
 
     # --- Windows Drag & Drop File Reception ---
 
+    def nativeEvent(self, eventType, message):
+        try:
+            if sys.platform == "win32" and message:
+                msg = wintypes.MSG.from_address(int(message))
+                if msg.message == 0x0233:  # WM_DROPFILES
+                    hDrop = msg.wParam
+                    shell32 = ctypes.windll.shell32
+                    count = shell32.DragQueryFileW(hDrop, 0xFFFFFFFF, None, 0)
+                    if count > 0:
+                        buf = ctypes.create_unicode_buffer(1024)
+                        shell32.DragQueryFileW(hDrop, 0, buf, 1024)
+                        dropped_path = buf.value
+                        if dropped_path:
+                            self._handle_file_dropped(os.path.normpath(dropped_path))
+                    shell32.DragFinish(hDrop)
+                    return True, 0
+        except Exception:
+            pass
+        return super().nativeEvent(eventType, message)
+
     def dragEnterEvent(self, event):
         if self.is_in_recycle_mission or self.is_click_through:
             event.ignore()
@@ -282,6 +305,8 @@ class PetWindow(QWidget):
                 self._update_bubble_position()
                 self.bubble.show_message("发现文件", "哇！主人交给我什么啦？松开鼠标交给我看看~", duration_ms=3000)
                 event.acceptProposedAction()
+                event.setDropAction(Qt.DropAction.CopyAction)
+                event.accept()
                 return
         event.ignore()
 
@@ -294,6 +319,8 @@ class PetWindow(QWidget):
             urls = [u for u in event.mimeData().urls() if u.isLocalFile()]
             if urls:
                 event.acceptProposedAction()
+                event.setDropAction(Qt.DropAction.CopyAction)
+                event.accept()
                 return
         event.ignore()
 
