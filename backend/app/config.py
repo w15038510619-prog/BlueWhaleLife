@@ -9,7 +9,14 @@ from typing import Optional, List
 from pydantic import BaseModel, Field
 
 if getattr(sys, "frozen", False):
-    BASE_DIR = Path(sys.executable).resolve().parent
+    exe_dir = Path(sys.executable).resolve().parent
+    # If the executable is in dist/BlueWhaleLife, point BASE_DIR to the root project directory
+    if exe_dir.name == "BlueWhaleLife" and exe_dir.parent.name == "dist":
+        BASE_DIR = exe_dir.parent.parent
+    elif (exe_dir.parent / "data").exists():
+        BASE_DIR = exe_dir.parent
+    else:
+        BASE_DIR = exe_dir
 else:
     BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
@@ -230,6 +237,15 @@ def save_settings(settings: AppSettings) -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(settings.model_dump(), f, ensure_ascii=False, indent=2)
+    # Also write a timestamped rolling backup in data/backups
+    try:
+        backup_dir = DATA_DIR / "backups"
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        backup_file = backup_dir / "config_latest_backup.json"
+        with open(backup_file, "w", encoding="utf-8") as bf:
+            json.dump(settings.model_dump(), bf, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
 
 
 current_settings = load_settings()

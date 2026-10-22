@@ -22,7 +22,8 @@ from desktop_pet.speech_bubble import SpeechBubble
 from desktop_pet.chat_dialog import ChatDialog
 from desktop_pet.virtual_bin_marker import VirtualRecycleBinMarker
 from desktop_pet.recycle_bin_helper import (
-    is_safe_to_recycle, recycle_file, find_desktop_recycle_bin_pos
+    is_safe_to_recycle, recycle_file, find_desktop_recycle_bin_pos,
+    enable_windows_drag_drop_privilege
 )
 
 GWL_EXSTYLE = -20
@@ -82,6 +83,11 @@ class PetWindow(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         # Enable dragging files onto the pet
         self.setAcceptDrops(True)
+        self.recycle_without_confirm = False
+        try:
+            enable_windows_drag_drop_privilege(int(self.winId()))
+        except Exception:
+            pass
 
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
@@ -217,6 +223,8 @@ class PetWindow(QWidget):
         pos = self.mapToGlobal(QPoint(0, 0))
         bx = pos.x() + (self.width() - self.bubble.width()) // 2
         by = pos.y() - self.bubble.height() - 10
+        if by < 10:
+            by = pos.y() + self.height() + 10
         self.bubble.move(bx, by)
 
     def _show_bubble(self):
@@ -277,6 +285,18 @@ class PetWindow(QWidget):
                 return
         event.ignore()
 
+    def dragMoveEvent(self, event):
+        if self.is_in_recycle_mission or self.is_click_through:
+            event.ignore()
+            return
+
+        if event.mimeData().hasUrls():
+            urls = [u for u in event.mimeData().urls() if u.isLocalFile()]
+            if urls:
+                event.acceptProposedAction()
+                return
+        event.ignore()
+
     def dragLeaveEvent(self, event):
         if not self.is_in_recycle_mission:
             self.renderer.set_state("idle")
@@ -294,7 +314,8 @@ class PetWindow(QWidget):
             return
 
         event.acceptProposedAction()
-        local_path = urls[0].toLocalFile()
+        raw_path = urls[0].toLocalFile().strip('"\'' )
+        local_path = os.path.normpath(raw_path)
         self._handle_file_dropped(local_path)
 
     def _handle_file_dropped(self, file_path: str):
@@ -318,6 +339,11 @@ class PetWindow(QWidget):
                 size_str = f"{size_bytes / (1024 * 1024):.1f} MB"
         except Exception:
             size_str = "大小未知"
+
+        # Check direct recycle mode
+        if getattr(self, "recycle_without_confirm", False):
+            self._start_recycle_mission(file_path)
+            return
 
         self.renderer.set_state("receive_file")
         self._update_bubble_position()
@@ -509,6 +535,13 @@ class PetWindow(QWidget):
         except Exception as e:
             self.bubble.show_message("测试提示", f"创建临时演示文件失败: {e}", 3000)
 
+    def _toggle_recycle_confirm(self):
+        self.recycle_without_confirm = not getattr(self, "recycle_without_confirm", False)
+        mode_desc = "拖入直接丢进回收站（无需二次点击）" if self.recycle_without_confirm else "二次弹窗确认（点击按钮后再送去回收站）"
+        self._update_bubble_position()
+        self.bubble.show_message("模式切换", f"丢垃圾已设为：{mode_desc}", duration_ms=3500)
+
+
     def _build_context_menu(self, menu: QMenu):
         menu.setStyleSheet("""
             QMenu {
@@ -548,6 +581,12 @@ class PetWindow(QWidget):
         trash_act = QAction("🗑️ 帮我丢垃圾 (功能演示)", self)
         trash_act.triggered.connect(self._demo_recycle_feature)
         menu.addAction(trash_act)
+
+        # Action: Toggle Recycle Confirmation
+        confirm_text = "开启确认弹窗 (防误触)" if not getattr(self, "recycle_without_confirm", False) else "关闭确认弹窗 (拖入直接丢)"
+        confirm_mode_act = QAction(f"⚙️ 丢垃圾模式: {confirm_text}", self)
+        confirm_mode_act.triggered.connect(self._toggle_recycle_confirm)
+        menu.addAction(confirm_mode_act)
 
         # Interaction Submenu
         interact_menu = menu.addMenu("✨ 宠溺互动")

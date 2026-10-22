@@ -146,3 +146,34 @@ def find_desktop_recycle_bin_pos() -> Tuple[int, int, bool]:
     # Visible, safe desktop target position:
     # Top-left margin of primary screen (standard Windows 11 Recycle Bin location: x=60, y=70)
     return (60, 70, True)
+
+
+def enable_windows_drag_drop_privilege(hwnd: int = 0):
+    """
+    Allow Drag & Drop messages from lower-integrity processes (e.g. Windows Explorer)
+    even if the pet is running as Administrator (UIPI bypass).
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        user32 = ctypes.windll.user32
+        WM_DROPFILES = 0x0233
+        WM_COPYDATA = 0x004A
+        WM_COPYGLOBALDATA = 0x0049
+        MSGFLT_ALLOW = 1
+        MSGFLT_ADD = 1
+
+        # Process-level filter (Vista+)
+        if hasattr(user32, "ChangeWindowMessageFilter"):
+            user32.ChangeWindowMessageFilter(WM_DROPFILES, MSGFLT_ALLOW)
+            user32.ChangeWindowMessageFilter(WM_COPYDATA, MSGFLT_ALLOW)
+            user32.ChangeWindowMessageFilter(WM_COPYGLOBALDATA, MSGFLT_ALLOW)
+
+        # Window-level filter (Win7+)
+        if hwnd and hasattr(user32, "ChangeWindowMessageFilterEx"):
+            user32.ChangeWindowMessageFilterEx(hwnd, WM_DROPFILES, MSGFLT_ADD, None)
+            user32.ChangeWindowMessageFilterEx(hwnd, WM_COPYDATA, MSGFLT_ADD, None)
+            user32.ChangeWindowMessageFilterEx(hwnd, WM_COPYGLOBALDATA, MSGFLT_ADD, None)
+    except Exception:
+        pass
+

@@ -73,6 +73,7 @@ class FishRenderer(QWidget):
         self.setFixedSize(self.base_width, self.base_height)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setMouseTracking(True)
+        self.setAcceptDrops(True)
 
         # Asset pixmap cache
         self.pixmaps: Dict[str, QPixmap] = {}
@@ -644,3 +645,32 @@ class FishRenderer(QWidget):
         elif rel_x > 0.65 and rel_y > 0.45:
             return "tail"
         return "body"
+
+    def dragEnterEvent(self, event):
+        p = self.parent()
+        if p and hasattr(p, "dragEnterEvent"):
+            p.dragEnterEvent(event)
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        p = self.parent()
+        if p and hasattr(p, "dragMoveEvent"):
+            p.dragMoveEvent(event)
+        else:
+            event.ignore()
+
+    def dragLeaveEvent(self, event):
+        p = self.parent()
+        if p and hasattr(p, "dragLeaveEvent"):
+            p.dragLeaveEvent(event)
+        else:
+            event.accept()
+
+    def dropEvent(self, event):
+        p = self.parent()
+        if p and hasattr(p, "dropEvent"):
+            p.dropEvent(event)
+        else:
+            event.ignore()
+

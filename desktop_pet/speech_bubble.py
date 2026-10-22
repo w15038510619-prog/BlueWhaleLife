@@ -13,9 +13,13 @@ class SpeechBubble(QWidget):
 
     def __init__(self, parent=None, on_chat_clicked=None):
         super().__init__(parent)
-        self.setWindowFlags(Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint | Qt.WindowType.SubWindow)
+        self.setWindowFlags(
+            Qt.WindowType.Tool |
+            Qt.WindowType.FramelessWindowHint |
+            Qt.WindowType.WindowStaysOnTopHint
+        )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setFixedWidth(260)
+        self.setFixedWidth(280)
 
         self.on_chat_clicked = on_chat_clicked
         self._on_confirm_cb: Optional[Callable] = None
@@ -150,10 +154,16 @@ class SpeechBubble(QWidget):
         self._on_cancel_cb = on_cancel
 
         self._set_confirm_mode(True)
-        self.mood_label.setText("🗑️ 发现待处理垃圾")
-        self.text_label.setText(f"主人，要把这个文件送进 Windows 回收站吗？\n📄 <b>{file_name}</b> ({size_str})")
+        self.mood_label.setText("🗑️ 发现待处理文件")
+        self.text_label.setText(
+            f"主人，要把这个文件送进 Windows 回收站吗？<br>"
+            f"📄 <b>{file_name}</b> <span style='color: #718096; font-size: 11px;'>({size_str})</span><br>"
+            f"<span style='color: #c53030; font-size: 11px; font-weight: bold;'>👉 请点击下方按钮确认执行：</span>"
+        )
         self.adjustSize()
         self.show()
+        self.raise_()
+        self.activateWindow()
 
     def paintEvent(self, event):
         painter = QPainter(self)
